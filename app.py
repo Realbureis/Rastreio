@@ -3,61 +3,70 @@ import pandas as pd
 import io
 import requests
 
-st.set_page_config(page_title="Streamlit to n8n", layout="wide")
+st.set_page_config(page_title="Rastreio Inteligente", layout="wide", page_icon="🚚")
 
-st.title("🚀 Automação de Rastreios")
+st.title("🚚 Disparador de Rastreios (Somente Cruzados)")
+st.markdown("Este sistema filtra automaticamente apenas os pedidos que possuem código de rastreio para envio ao n8n.")
 
+# --- ENTRADA DE DADOS ---
 col1, col2 = st.columns(2)
 with col1:
-    input_vendas = st.text_area("1. Cole dados de Vendas (N. Pedido):", height=200)
+    input_vendas = st.text_area("1. Cole dados de Vendas:", height=200, placeholder="N. Pedido\tData\tCliente...")
 with col2:
-    input_rastreio = st.text_area("2. Cole dados de Rastreio (Pedido):", height=200)
+    input_rastreio = st.text_area("2. Cole dados de Rastreio:", height=200, placeholder="Pedido\tCódigo de Rastreio...")
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo e limpando
+        # Lendo os dados
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t')
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t')
 
-        # Padroniza coluna de busca
+        # Padronizando coluna de ligação
         if 'Pedido' in df_rastreio.columns:
             df_rastreio = df_rastreio.rename(columns={'Pedido': 'N. Pedido'})
 
-        # Limpeza pesada para garantir o match (remove espaços e vira string)
+        # Limpeza para garantir o cruzamento
         df_vendas['N. Pedido'] = df_vendas['N. Pedido'].astype(str).str.strip()
         df_rastreio['N. Pedido'] = df_rastreio['N. Pedido'].astype(str).str.strip()
 
-        # Merge (União)
-        # Usamos how='inner' se você só quiser quem tem rastreio 
-        # Ou how='left' se quiser ver todos, mesmo os sem rastreio
-        df_final = pd.merge(df_vendas, df_rastreio[['N. Pedido', 'Código de Rastreio']], on='N. Pedido', how='left')
+        # Cruzamento (Merge)
+        # Usamos how='inner' para manter APENAS o que existe em AMBAS as tabelas
+        df_final = pd.merge(df_vendas, df_rastreio[['N. Pedido', 'Código de Rastreio']], on='N. Pedido', how='inner')
 
-        # Estatísticas para você conferir
-        total_vendas = len(df_vendas)
-        com_rastreio = df_final['Código de Rastreio'].notna().sum()
-
-        st.info(f"📊 Resumo: {total_vendas} vendas coladas | {com_rastreio} rastreios encontrados.")
-
-        # REMOVIDO O .head() - Agora mostra a tabela inteira (Streamlit cria barra de rolagem)
-        st.subheader("Dados Processados")
-        st.dataframe(df_final) 
-
-        # --- ENVIO PARA N8N ---
-        st.divider()
-        webhook_url = st.text_input("URL do Webhook n8n:", "SUA_URL_AQUI")
-        
-        if st.button("🚀 Enviar TODOS para o n8n"):
-            # Filtramos para enviar apenas quem tem rastreio (para não gastar API atoa)
-            dados_para_enviar = df_final[df_final['Código de Rastreio'].notna()].to_dict(orient='records')
+        # --- EXIBIÇÃO ---
+        if not df_final.empty:
+            st.success(f"🔥 Sucesso! Encontramos {len(df_final)} pedidos prontos para envio.")
             
-            if len(dados_para_enviar) > 0:
-                response = requests.post(webhook_url, json=dados_para_enviar)
-                if response.status_code == 200:
-                    st.success(f"Enviado! {len(dados_para_enviar)} itens disparados.")
+            # Reorganizar para o rastreio aparecer na frente
+            cols = list(df_final.columns)
+            rastreio_col = cols.pop(cols.index('Código de Rastreio'))
+            cols.insert(1, rastreio_col)
+            df_final = df_final[cols]
+
+            st.subheader("📋 Lista de Envio (Apenas com Rastreio)")
+            st.dataframe(df_final)
+
+            # --- INTEGRAÇÃO N8N ---
+            st.divider()
+            webhook_url = st.text_input("Cole sua URL do Webhook n8n aqui:", "https://")
+            
+            if st.button("🚀 Disparar para n8n agora"):
+                if webhook_url == "https://":
+                    st.warning("Por favor, insira uma URL válida do n8n.")
                 else:
-                    st.error(f"Erro no n8n: {response.status_code}")
-            else:
-                st.warning("Nenhum dado com rastreio para enviar.")
+                    payload = df_final.to_dict(orient='records')
+                    with st.spinner("Enviando dados..."):
+                        try:
+                            response = requests.post(webhook_url, json=payload, timeout=15)
+                            if response.status_code == 200:
+                                st.balloons()
+                                st.success(f"Enviado! {len(df_final)} mensagens estão sendo processadas pelo n8n.")
+                            else:
+                                st.error(f"O n8n retornou erro {response.status_code}")
+                        except Exception as e:
+                            st.error(f"Erro na conexão com o Webhook: {e}")
+        else:
+            st.warning("⚠️ Nenhum pedido coincidente encontrado. Verifique se os números dos pedidos nas duas colagens são os mesmos.")
 
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro ao processar dados: {e}")
