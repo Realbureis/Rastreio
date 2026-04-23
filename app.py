@@ -10,7 +10,7 @@ st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="
 def tratar_primeiro_nome(texto):
     """Extrai apenas o primeiro nome em Title Case"""
     txt = str(texto).strip()
-    if not txt or txt.lower() in ["nan", "none", "0"]:
+    if not txt or txt.lower() in ["nan", "none", "0", "-"]:
         return "N/A"
     return txt.split()[0].title()
 
@@ -21,10 +21,10 @@ st.markdown("---")
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("1. Dados de Vendas")
-    input_vendas = st.text_area("Cole aqui (Pedido, Cliente, Fone Fixo, Ultimo Detento cadastrado...):", height=200)
+    input_vendas = st.text_area("Cole os dados de Vendas aqui:", height=200)
 with col2:
     st.subheader("2. Dados de Rastreio")
-    input_rastreio = st.text_area("Cole aqui (Pedido, Código de Rastreio):", height=200)
+    input_rastreio = st.text_area("Cole os dados de Rastreio aqui:", height=200)
 
 if input_vendas and input_rastreio:
     try:
@@ -32,42 +32,37 @@ if input_vendas and input_rastreio:
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
-        # --- PADRONIZAÇÃO DE COLUNAS (Evita o erro 'not unique') ---
-        def padronizar_coluna_pedido(df):
+        # --- PADRONIZAÇÃO AUTOMÁTICA DE COLUNAS ---
+        def auto_mapear(df):
+            mapa = {}
             for col in df.columns:
-                if "PEDIDO" in col.upper():
-                    # Renomeia e remove outras colunas que possam ter nomes parecidos
-                    df = df.rename(columns={col: 'ID_PEDIDO'})
-                    break
-            return df
+                c_upper = col.upper().strip()
+                if "PEDIDO" in c_upper: mapa[col] = "ID_PEDIDO"
+                elif "CLIENTE" in c_upper: mapa[col] = "Cliente"
+                elif "DETENTO" in c_upper or "CADASTRA" in c_upper: mapa[col] = "Detento"
+                elif "FONE" in c_upper or "FIXO" in c_upper: mapa[col] = "Fone"
+                elif "RASTREIO" in c_upper: mapa[col] = "Código de Rastreio"
+            return df.rename(columns=mapa)
 
-        df_vendas = padronizar_coluna_pedido(df_vendas)
-        df_rastreio = padronizar_coluna_pedido(df_rastreio)
+        df_vendas = auto_mapear(df_vendas)
+        df_rastreio = auto_mapear(df_rastreio)
 
-        # Limpeza das chaves de cruzamento
+        # Remove duplicatas de colunas se o mapeamento criar nomes repetidos
+        df_vendas = df_vendas.loc[:, ~df_vendas.columns.duplicated()]
+        df_rastreio = df_rastreio.loc[:, ~df_rastreio.columns.duplicated()]
+
+        # Limpeza das chaves
         df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
         df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
 
-        # CRUZAMENTO (INNER JOIN) - Usando o nome temporário ID_PEDIDO para evitar duplicidade
+        # CRUZAMENTO (INNER JOIN)
         df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
-            # --- MAPEAMENTO DOS SEUS CAMPOS ---
-            mapeamento = {
-                'Ultimo Detento cadastrado': 'Detento',
-                'Fone Fixo': 'Fone',
-                'Cliente': 'Cliente',
-                'Código de Rastreio': 'Código de Rastreio',
-                'ID_PEDIDO': 'N. Pedido'
-            }
-            
-            # Renomeia para o padrão final
-            df_envio = df_final.rename(columns=mapeamento)
-            
-            # Seleciona apenas as colunas necessárias para o n8n
-            colunas_finais = ['Cliente', 'Detento', 'Fone', 'Código de Rastreio', 'N. Pedido']
-            existentes = [c for c in colunas_finais if c in df_envio.columns]
-            df_envio = df_envio[existentes].copy()
+            # Seleciona apenas as colunas que conseguimos mapear
+            colunas_alvo = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
+            existentes = [c for c in colunas_alvo if c in df_final.columns]
+            df_envio = df_final[existentes].copy()
 
             # --- FORMATAÇÃO ---
             if 'Cliente' in df_envio.columns:
@@ -79,29 +74,30 @@ if input_vendas and input_rastreio:
 
             # --- EXIBIÇÃO DA TABELA ---
             st.success(f"✅ {len(df_envio)} pedidos prontos para conferência!")
+            
             st.subheader("📋 Auditoria de Dados (Primeiro Nome)")
-            st.dataframe(df_envio[['N. Pedido', 'Cliente', 'Detento', 'Código de Rastreio']], use_container_width=True)
+            # Exibição segura: só mostra o que existe
+            cols_show = [c for c in ['ID_PEDIDO', 'Cliente', 'Detento', 'Código de Rastreio'] if c in df_envio.columns]
+            st.dataframe(df_envio[cols_show], use_container_width=True)
 
             # --- SEÇÃO DE DISPARO ---
             st.divider()
-            webhook = st.text_input("URL do Webhook (Certifique-se de estar como POST no n8n):", 
-                                   value="https://jumbocdp.app.n8n.cloud/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+            webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
             
             if st.button("Confirmar Envio para WhatsApp"):
                 if webhook.startswith("https://"):
                     payload = df_envio.to_dict(orient='records')
                     try:
-                        # Envio via POST
-                        res = requests.post(webhook, json=payload, timeout=30)
+                        res = requests.post(webhook, json=payload, timeout=35)
                         if res.status_code in [200, 201]:
                             st.balloons()
-                            st.success("Tudo certo! Dados enviados para o n8n.")
+                            st.success("Dados enviados com sucesso para o n8n!")
                         else:
-                            st.error(f"Erro no n8n ({res.status_code}): Verifique se o método é POST.")
+                            st.error(f"Erro {res.status_code}: Mude o Webhook no n8n para POST.")
                     except Exception as e:
                         st.error(f"Erro de conexão: {e}")
                 else:
-                    st.warning("Insira uma URL de Webhook válida.")
+                    st.warning("Insira uma URL válida.")
         else:
             st.warning("⚠️ Nenhum pedido coincidente encontrado.")
     except Exception as e:
