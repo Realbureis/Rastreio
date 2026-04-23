@@ -4,22 +4,10 @@ import io
 import requests
 import re
 
-# 1. Configuração da Página (Sempre a primeira função Streamlit)
+# 1. Configuração da Página
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
 
-# 2. Estilização do Botão (CORRIGIDO: unsafe_allow_html)
-st.markdown("""
-    <style>
-    .stButton>button {
-        width: 100%;
-        background-color: #007bff;
-        color: white;
-        font-weight: bold;
-        height: 3em;
-        border-radius: 8px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# Removido o bloco de CSS st.markdown(style) que causava o TypeError no seu log
 
 def tratar_primeiro_nome(texto):
     """Extrai apenas o primeiro nome, garantindo que o dado seja String"""
@@ -47,7 +35,7 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados como string para evitar erro de float
+        # Lendo os dados como string
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str)
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str)
 
