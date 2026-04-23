@@ -4,10 +4,10 @@ import io
 import requests
 import re
 
-# 1. Configuração da Página
+# 1. Configuração da Página (Sempre a primeira função Streamlit)
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
 
-# 2. Estilização do Botão
+# 2. Estilização do Botão (CORRIGIDO: unsafe_allow_html)
 st.markdown("""
     <style>
     .stButton>button {
@@ -22,11 +22,10 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def tratar_primeiro_nome(texto):
-    """Extrai apenas o primeiro nome, garantindo que o dado seja String (evita erro de float)"""
+    """Extrai apenas o primeiro nome, garantindo que o dado seja String"""
     if pd.isna(texto) or str(texto).strip() == "" or str(texto).lower() == "nan":
         return "N/A"
     
-    # Forçamos a conversão para string e pegamos a primeira parte
     nome_completo = str(texto).strip()
     partes = nome_completo.split()
     
@@ -48,7 +47,7 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados - Usamos low_memory=False para evitar palpites errados de tipo de dado
+        # Lendo os dados como string para evitar erro de float
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str)
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str)
 
@@ -56,7 +55,6 @@ if input_vendas and input_rastreio:
         if 'Pedido' in df_rastreio.columns:
             df_rastreio = df_rastreio.rename(columns={'Pedido': 'N. Pedido'})
 
-        # Limpeza básica das chaves
         df_vendas['N. Pedido'] = df_vendas['N. Pedido'].str.strip()
         df_rastreio['N. Pedido'] = df_rastreio['N. Pedido'].str.strip()
 
@@ -77,16 +75,13 @@ if input_vendas and input_rastreio:
             
             df_envio = df_final[colunas_existentes].copy()
 
-            # --- TRATAMENTO DOS DADOS (Aqui corrigimos o erro da imagem) ---
-            
-            # Formatar nomes (Primeiro nome + Title Case)
+            # --- TRATAMENTO DOS DADOS ---
             if 'Cliente' in df_envio.columns:
                 df_envio['Cliente'] = df_envio['Cliente'].apply(tratar_primeiro_nome)
             
             if 'Detento' in df_envio.columns:
                 df_envio['Detento'] = df_envio['Detento'].apply(tratar_primeiro_nome)
 
-            # Limpeza de Telefone (Regex blindado para strings)
             if 'Fone' in df_envio.columns:
                 df_envio['Fone'] = df_envio['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)) if pd.notna(x) else "")
 
