@@ -82,7 +82,7 @@ if input_vendas and input_rastreio:
 
             # --- SEÇÃO DE DISPARO ---
             st.divider()
-            webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+            webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
             
             if st.button("Confirmar Envio para WhatsApp"):
                 if webhook.startswith("https://"):
