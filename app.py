@@ -8,11 +8,10 @@ import re
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
 
 def tratar_primeiro_nome(texto):
-    """Extrai apenas o primeiro nome e coloca em Title Case"""
+    """Extrai apenas o primeiro nome em Title Case"""
     txt = str(texto).strip()
     if not txt or txt.lower() in ["nan", "none", "0"]:
         return "N/A"
-    # Pega a primeira palavra e formata
     return txt.split()[0].title()
 
 st.title("🚚 Disparador de Rastreios | Jumbo CDP")
@@ -29,75 +28,81 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados forçando String para evitar erros de tipo
+        # Lendo os dados como String
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
-        # Padronizando coluna de Pedido para o cruzamento
-        # O sistema procura por 'Pedido' ou 'N. Pedido' em ambas
-        for df in [df_vendas, df_rastreio]:
+        # --- PADRONIZAÇÃO DE COLUNAS (Evita o erro 'not unique') ---
+        def padronizar_coluna_pedido(df):
             for col in df.columns:
                 if "PEDIDO" in col.upper():
-                    df.rename(columns={col: 'N. Pedido'}, inplace=True)
+                    # Renomeia e remove outras colunas que possam ter nomes parecidos
+                    df = df.rename(columns={col: 'ID_PEDIDO'})
+                    break
+            return df
 
-        # Cruzamento (Merge)
-        # Filtramos apenas as colunas que você especificou para o cruzamento
-        df_final = pd.merge(df_vendas, df_rastreio, on='N. Pedido', how='inner')
+        df_vendas = padronizar_coluna_pedido(df_vendas)
+        df_rastreio = padronizar_coluna_pedido(df_rastreio)
+
+        # Limpeza das chaves de cruzamento
+        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
+        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
+
+        # CRUZAMENTO (INNER JOIN) - Usando o nome temporário ID_PEDIDO para evitar duplicidade
+        df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
-            # --- MAPEAMENTO EXATO ---
-            # Aqui usamos exatamente os nomes que você forneceu
+            # --- MAPEAMENTO DOS SEUS CAMPOS ---
             mapeamento = {
                 'Ultimo Detento cadastrado': 'Detento',
                 'Fone Fixo': 'Fone',
                 'Cliente': 'Cliente',
-                'Código de Rastreio': 'Código de Rastreio'
+                'Código de Rastreio': 'Código de Rastreio',
+                'ID_PEDIDO': 'N. Pedido'
             }
             
-            # Renomeia as colunas para o padrão do n8n
+            # Renomeia para o padrão final
             df_envio = df_final.rename(columns=mapeamento)
             
-            # Seleciona apenas as colunas que interessam
-            colunas_finais = ['Cliente', 'Detento', 'Fone', 'Código de Rastreio']
+            # Seleciona apenas as colunas necessárias para o n8n
+            colunas_finais = ['Cliente', 'Detento', 'Fone', 'Código de Rastreio', 'N. Pedido']
             existentes = [c for c in colunas_finais if c in df_envio.columns]
             df_envio = df_envio[existentes].copy()
 
-            # --- FORMATAÇÃO DE DADOS ---
+            # --- FORMATAÇÃO ---
             if 'Cliente' in df_envio.columns:
                 df_envio['Cliente'] = df_envio['Cliente'].apply(tratar_primeiro_nome)
             if 'Detento' in df_envio.columns:
                 df_envio['Detento'] = df_envio['Detento'].apply(tratar_primeiro_nome)
             if 'Fone' in df_envio.columns:
-                # Limpa o telefone deixando só números
                 df_envio['Fone'] = df_envio['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)))
 
             # --- EXIBIÇÃO DA TABELA ---
             st.success(f"✅ {len(df_envio)} pedidos prontos para conferência!")
-            st.subheader("📋 Auditoria de Nomes (Primeiro Nome apenas)")
-            st.dataframe(df_envio[['Cliente', 'Detento', 'Código de Rastreio']], use_container_width=True)
+            st.subheader("📋 Auditoria de Dados (Primeiro Nome)")
+            st.dataframe(df_envio[['N. Pedido', 'Cliente', 'Detento', 'Código de Rastreio']], use_container_width=True)
 
             # --- SEÇÃO DE DISPARO ---
             st.divider()
-            st.subheader("🚀 Enviar para WhatsApp")
-            webhook = st.text_input("URL do Webhook (Deve ser POST no n8n):", 
+            webhook = st.text_input("URL do Webhook (Certifique-se de estar como POST no n8n):", 
                                    value="https://jumbocdp.app.n8n.cloud/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
             
-            if st.button("Confirmar Envio"):
+            if st.button("Confirmar Envio para WhatsApp"):
                 if webhook.startswith("https://"):
                     payload = df_envio.to_dict(orient='records')
                     try:
-                        # Envia os dados
+                        # Envio via POST
                         res = requests.post(webhook, json=payload, timeout=30)
                         if res.status_code in [200, 201]:
                             st.balloons()
-                            st.success("Dados disparados com sucesso!")
+                            st.success("Tudo certo! Dados enviados para o n8n.")
                         else:
-                            st.error(f"Erro no n8n ({res.status_code}): Verifique se o nó está como POST.")
+                            st.error(f"Erro no n8n ({res.status_code}): Verifique se o método é POST.")
                     except Exception as e:
                         st.error(f"Erro de conexão: {e}")
                 else:
-                    st.warning("⚠️ Insira uma URL de Webhook válida.")
+                    st.warning("Insira uma URL de Webhook válida.")
         else:
-            st.warning("⚠️ Nenhum pedido coincidente encontrado entre as tabelas.")
+            st.warning("⚠️ Nenhum pedido coincidente encontrado.")
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
