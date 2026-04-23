@@ -22,11 +22,17 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def tratar_primeiro_nome(texto):
-    """Extrai apenas o primeiro nome e coloca em Title Case"""
-    if pd.isna(texto) or str(texto).strip() == "":
+    """Extrai apenas o primeiro nome, garantindo que o dado seja String (evita erro de float)"""
+    if pd.isna(texto) or str(texto).strip() == "" or str(texto).lower() == "nan":
         return "N/A"
-    partes = str(texto).split()
-    return partes[0].strip().title() if partes else "N/A"
+    
+    # Forçamos a conversão para string e pegamos a primeira parte
+    nome_completo = str(texto).strip()
+    partes = nome_completo.split()
+    
+    if partes:
+        return partes[0].title()
+    return "N/A"
 
 st.title("🚚 Disparador de Rastreios | Jumbo CDP")
 st.markdown("---")
@@ -35,59 +41,59 @@ st.markdown("---")
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("1. Dados de Vendas")
-    input_vendas = st.text_area("Cole aqui (N. Pedido, Cliente, Fone Fixo, Último detento...):", height=200)
+    input_vendas = st.text_area("Cole as colunas do Excel:", height=200, placeholder="N. Pedido, Cliente, Fone Fixo, Último detento cadastrado...")
 with col2:
     st.subheader("2. Dados de Rastreio")
-    input_rastreio = st.text_area("Cole aqui (Pedido, Código de Rastreio):", height=200)
+    input_rastreio = st.text_area("Cole as colunas de Rastreio:", height=200, placeholder="Pedido\tCódigo de Rastreio")
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados com separador de tabulação (Excel)
-        df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t')
-        df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t')
+        # Lendo os dados - Usamos low_memory=False para evitar palpites errados de tipo de dado
+        df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str)
+        df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str)
 
         # Padronizando coluna de ligação
         if 'Pedido' in df_rastreio.columns:
             df_rastreio = df_rastreio.rename(columns={'Pedido': 'N. Pedido'})
 
-        df_vendas['N. Pedido'] = df_vendas['N. Pedido'].astype(str).str.strip()
-        df_rastreio['N. Pedido'] = df_rastreio['N. Pedido'].astype(str).str.strip()
+        # Limpeza básica das chaves
+        df_vendas['N. Pedido'] = df_vendas['N. Pedido'].str.strip()
+        df_rastreio['N. Pedido'] = df_rastreio['N. Pedido'].str.strip()
 
-        # CRUZAMENTO
+        # CRUZAMENTO (INNER JOIN)
         df_final = pd.merge(df_vendas, df_rastreio[['N. Pedido', 'Código de Rastreio']], on='N. Pedido', how='inner')
 
         if not df_final.empty:
-            # --- MAPEAMENTO DE COLUNAS (Ajustado para Fone Fixo) ---
+            # --- MAPEAMENTO DE COLUNAS ---
             mapeamento = {
                 'Último detento cadastrado': 'Detento',
                 'Fone Fixo': 'Fone'
             }
+            df_final = df_final.rename(columns=lambda x: mapeamento.get(x.strip(), x.strip()))
             
-            # Renomeia as colunas se elas existirem na planilha colada
-            df_final = df_final.rename(columns=lambda x: mapeamento.get(x, x))
-            
-            # Garantimos que as colunas essenciais existam no DataFrame processado
+            # Colunas essenciais para o envio
             colunas_esperadas = ['Cliente', 'Detento', 'Fone', 'Código de Rastreio']
             colunas_existentes = [c for c in colunas_esperadas if c in df_final.columns]
             
             df_envio = df_final[colunas_existentes].copy()
 
-            # --- FORMATAÇÃO: Primeiro Nome e Title Case ---
+            # --- TRATAMENTO DOS DADOS (Aqui corrigimos o erro da imagem) ---
+            
+            # Formatar nomes (Primeiro nome + Title Case)
             if 'Cliente' in df_envio.columns:
                 df_envio['Cliente'] = df_envio['Cliente'].apply(tratar_primeiro_nome)
             
             if 'Detento' in df_envio.columns:
                 df_envio['Detento'] = df_envio['Detento'].apply(tratar_primeiro_nome)
 
-            # --- LIMPEZA DE TELEFONE ---
+            # Limpeza de Telefone (Regex blindado para strings)
             if 'Fone' in df_envio.columns:
-                df_envio['Fone'] = df_envio['Fone'].astype(str).apply(lambda x: re.sub(r'\D', '', x))
+                df_envio['Fone'] = df_envio['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)) if pd.notna(x) else "")
 
             # --- EXIBIÇÃO ---
             st.success(f"✅ {len(df_envio)} jumbos prontos para envio!")
             
-            st.subheader("📋 Conferência (Apenas primeiro nome)")
-            # Exibe a tabela sem mostrar o Fone para ficar mais limpo
+            st.subheader("📋 Conferência Final")
             st.dataframe(df_envio[['Cliente', 'Detento', 'Código de Rastreio']], use_container_width=True)
 
             # --- DISPARO ---
@@ -97,18 +103,18 @@ if input_vendas and input_rastreio:
             if st.button("🚀 Confirmar e Enviar para o WhatsApp"):
                 if webhook_url.startswith("https://"):
                     payload = df_envio.to_dict(orient='records')
-                    with st.spinner("Enviando dados formatados..."):
+                    with st.spinner("Enviando dados para o n8n..."):
                         try:
-                            response = requests.post(webhook_url, json=payload, timeout=25)
+                            response = requests.post(webhook_url, json=payload, timeout=30)
                             if response.status_code == 200:
                                 st.balloons()
-                                st.success(f"Show! {len(payload)} envios entregues com sucesso.")
+                                st.success("Sucesso! O n8n recebeu a lista formatada.")
                             else:
                                 st.error(f"Erro no n8n: {response.status_code}")
                         except Exception as e:
                             st.error(f"Erro na conexão: {e}")
                 else:
-                    st.warning("Insira uma URL de Webhook válida.")
+                    st.warning("Insira uma URL válida.")
         else:
             st.warning("⚠️ Nenhum pedido coincidente encontrado entre as listas.")
 
