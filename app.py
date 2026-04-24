@@ -5,7 +5,7 @@ import requests
 import re
 
 # 1. Configuração da Página
-st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Jumbo CDP - Full Data", layout="wide", page_icon="🚚")
 
 def tratar_primeiro_nome(texto):
     """Extrai apenas o primeiro nome em Title Case"""
@@ -32,7 +32,7 @@ if input_vendas and input_rastreio:
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
-        # --- PADRONIZAÇÃO AUTOMÁTICA DE COLUNAS ---
+        # --- PADRONIZAÇÃO DE COLUNAS ---
         def auto_mapear(df):
             mapa = {}
             for col in df.columns:
@@ -47,37 +47,40 @@ if input_vendas and input_rastreio:
         df_vendas = auto_mapear(df_vendas)
         df_rastreio = auto_mapear(df_rastreio)
 
-        # Remove duplicatas de colunas se o mapeamento criar nomes repetidos
-        df_vendas = df_vendas.loc[:, ~df_vendas.columns.duplicated()]
-        df_rastreio = df_rastreio.loc[:, ~df_rastreio.columns.duplicated()]
-
-        # Limpeza das chaves
+        # Limpeza das chaves para o Join
         df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
         df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
 
         # --- CRUZAMENTO (INNER JOIN) ---
-        # Mantemos todas as colunas de vendas e trazemos o rastreio
-        df_final = pd.merge(df_vendas, df_rastreio, on='ID_PEDIDO', how='inner')
+        # Trazemos o rastreio para dentro da tabela de vendas mantendo tudo
+        df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
-            # Agora não filtramos mais 'colunas_alvo'. Enviamos o DataFrame completo!
-            df_envio = df_final.copy()
+            # Remove duplicatas de colunas
+            df_final = df_final.loc[:, ~df_final.columns.duplicated()]
 
-            # --- FORMATAÇÃO DE SEGURANÇA (Apenas se as colunas existirem) ---
-            if 'Cliente' in df_envio.columns:
-                df_envio['Cliente_Tratado'] = df_envio['Cliente'].apply(tratar_primeiro_nome)
-            if 'Detento' in df_envio.columns:
-                df_envio['Detento_Tratado'] = df_envio['Detento'].apply(tratar_primeiro_nome)
-            if 'Fone' in df_envio.columns:
-                df_envio['Fone'] = df_envio['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)))
+            # --- FORMATAÇÃO DAS COLUNAS PRINCIPAIS ---
+            if 'Cliente' in df_final.columns:
+                df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
+            if 'Detento' in df_final.columns:
+                df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
+            if 'Fone' in df_final.columns:
+                df_final['Fone'] = df_final['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)))
+
+            # --- ORGANIZAÇÃO DE COLUNAS (Visualização) ---
+            # Colocamos as suas colunas favoritas no começo, e o resto depois
+            cols_principais = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
+            cols_principais = [c for c in cols_principais if c in df_final.columns]
+            cols_restantes = [c for c in df_final.columns if c not in cols_principais]
+            
+            # DataFrame final ordenado para o Preview e para o Envio
+            df_envio = df_final[cols_principais + cols_restantes].copy()
 
             # --- EXIBIÇÃO DA TABELA ---
-            st.success(f"✅ {len(df_envio)} pedidos prontos para envio total!")
+            st.success(f"✅ {len(df_envio)} pedidos processados com sucesso!")
             
-            st.subheader("📋 Auditoria de Dados (Visualização Simples)")
-            # Mostra apenas um resumo na tela, mas o envio será de TUDO
-            cols_preview = [c for c in ['ID_PEDIDO', 'Cliente', 'Código de Rastreio'] if c in df_envio.columns]
-            st.dataframe(df_envio[cols_preview], use_container_width=True)
+            st.subheader("📋 Preview da Tabela (Colunas Principais + Dados Extras)")
+            st.dataframe(df_envio, use_container_width=True)
 
             # --- SEÇÃO DE DISPARO ---
             st.divider()
@@ -85,19 +88,16 @@ if input_vendas and input_rastreio:
             
             if st.button("Confirmar Envio para WhatsApp"):
                 if webhook.startswith("https://"):
-                    # Aqui está a mágica: enviamos o dicionário completo de cada usuário
                     payload = df_envio.to_dict(orient='records')
                     try:
-                        res = requests.post(webhook, json=payload, timeout=35)
+                        res = requests.post(webhook, json=payload, timeout=40)
                         if res.status_code in [200, 201]:
                             st.balloons()
-                            st.success(f"Sucesso! {len(payload)} usuários enviados com todos os dados para o n8n.")
+                            st.success(f"Show! {len(payload)} usuários enviados com dados completos para o n8n.")
                         else:
                             st.error(f"Erro {res.status_code}: Verifique o Webhook.")
                     except Exception as e:
                         st.error(f"Erro de conexão: {e}")
-                else:
-                    st.warning("Insira uma URL válida.")
         else:
             st.warning("⚠️ Nenhum pedido coincidente encontrado.")
     except Exception as e:
