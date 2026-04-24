@@ -28,7 +28,7 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados como String
+        # Lendo os dados como String para evitar erros de tipo
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
@@ -47,16 +47,23 @@ if input_vendas and input_rastreio:
         df_vendas = auto_mapear(df_vendas)
         df_rastreio = auto_mapear(df_rastreio)
 
-        # Limpeza das chaves para o Join
-        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
-        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
+        # Garantir que ID_PEDIDO existe e limpar espaços (Evita o erro 'DataFrame object has no attribute str')
+        if "ID_PEDIDO" in df_vendas.columns:
+            df_vendas["ID_PEDIDO"] = df_vendas["ID_PEDIDO"].astype(str).str.strip()
+        if "ID_PEDIDO" in df_rastreio.columns:
+            df_rastreio["ID_PEDIDO"] = df_rastreio["ID_PEDIDO"].astype(str).str.strip()
 
         # --- CRUZAMENTO (INNER JOIN) ---
-        # Trazemos o rastreio para dentro da tabela de vendas mantendo tudo
-        df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
+        # Trazemos o código de rastreio para a tabela de vendas original
+        if "ID_PEDIDO" in df_vendas.columns and "ID_PEDIDO" in df_rastreio.columns:
+            # Selecionamos apenas ID_PEDIDO e Código de Rastreio da segunda tabela para o join
+            cols_rastreio = [c for c in ["ID_PEDIDO", "Código de Rastreio"] if c in df_rastreio.columns]
+            df_final = pd.merge(df_vendas, df_rastreio[cols_rastreio], on='ID_PEDIDO', how='inner')
+        else:
+            df_final = pd.DataFrame()
 
         if not df_final.empty:
-            # Remove duplicatas de colunas
+            # Remove duplicatas de colunas que podem ter surgido
             df_final = df_final.loc[:, ~df_final.columns.duplicated()]
 
             # --- FORMATAÇÃO DAS COLUNAS PRINCIPAIS ---
@@ -68,18 +75,16 @@ if input_vendas and input_rastreio:
                 df_final['Fone'] = df_final['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)))
 
             # --- ORGANIZAÇÃO DE COLUNAS (Visualização) ---
-            # Colocamos as suas colunas favoritas no começo, e o resto depois
             cols_principais = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
-            cols_principais = [c for c in cols_principais if c in df_final.columns]
-            cols_restantes = [c for c in df_final.columns if c not in cols_principais]
+            # Filtra apenas as que realmente existem no resultado
+            cols_existentes = [c for c in cols_principais if c in df_final.columns]
+            cols_extras = [c for c in df_final.columns if c not in cols_existentes]
             
-            # DataFrame final ordenado para o Preview e para o Envio
-            df_envio = df_final[cols_principais + cols_restantes].copy()
+            # DataFrame final ordenado: Principais primeiro, extras depois
+            df_envio = df_final[cols_existentes + cols_extras].copy()
 
             # --- EXIBIÇÃO DA TABELA ---
-            st.success(f"✅ {len(df_envio)} pedidos processados com sucesso!")
-            
-            st.subheader("📋 Preview da Tabela (Colunas Principais + Dados Extras)")
+            st.success(f"✅ {len(df_envio)} pedidos processados!")
             st.dataframe(df_envio, use_container_width=True)
 
             # --- SEÇÃO DE DISPARO ---
@@ -93,12 +98,12 @@ if input_vendas and input_rastreio:
                         res = requests.post(webhook, json=payload, timeout=40)
                         if res.status_code in [200, 201]:
                             st.balloons()
-                            st.success(f"Show! {len(payload)} usuários enviados com dados completos para o n8n.")
+                            st.success(f"Show! {len(payload)} usuários enviados com dados completos.")
                         else:
-                            st.error(f"Erro {res.status_code}: Verifique o Webhook.")
+                            st.error(f"Erro {res.status_code}. Verifique o n8n.")
                     except Exception as e:
                         st.error(f"Erro de conexão: {e}")
         else:
-            st.warning("⚠️ Nenhum pedido coincidente encontrado.")
+            st.warning("⚠️ Nenhum ID de pedido coincidente encontrado.")
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
