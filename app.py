@@ -28,9 +28,18 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados e FORÇANDO tudo para string imediatamente
-        df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t').fillna("").astype(str)
-        df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t').fillna("").astype(str)
+        # Lendo os dados
+        df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t').fillna("")
+        df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t').fillna("")
+
+        # VERIFICAÇÃO CRÍTICA: Se o DF estiver vazio (Erro 0), para aqui
+        if df_vendas.empty or df_rastreio.empty:
+            st.error("Erro: Uma das colagens parece estar vazia ou mal formatada.")
+            st.stop()
+
+        # Converte tudo para string DEPOIS de verificar se não está vazio
+        df_vendas = df_vendas.astype(str)
+        df_rastreio = df_rastreio.astype(str)
 
         # --- PADRONIZAÇÃO DE COLUNAS ---
         def auto_mapear(df):
@@ -47,7 +56,7 @@ if input_vendas and input_rastreio:
         df_vendas = auto_mapear(df_vendas)
         df_rastreio = auto_mapear(df_rastreio)
 
-        # Limpeza segura das chaves (usando apply para garantir que não dê erro de atributo)
+        # Limpeza das chaves de cruzamento
         if "ID_PEDIDO" in df_vendas.columns:
             df_vendas["ID_PEDIDO"] = df_vendas["ID_PEDIDO"].apply(lambda x: str(x).strip())
         if "ID_PEDIDO" in df_rastreio.columns:
@@ -55,16 +64,18 @@ if input_vendas and input_rastreio:
 
         # --- CRUZAMENTO (INNER JOIN) ---
         if "ID_PEDIDO" in df_vendas.columns and "ID_PEDIDO" in df_rastreio.columns:
-            # Selecionamos apenas o necessário da tabela de rastreio para o join
-            cols_rastreio = [c for c in ["ID_PEDIDO", "Código de Rastreio"] if c in df_rastreio.columns]
-            df_final = pd.merge(df_vendas, df_rastreio[cols_rastreio], on='ID_PEDIDO', how='inner')
+            # Pegamos o rastreio e garantimos que o ID_PEDIDO seja a chave
+            df_rastreio_min = df_rastreio[["ID_PEDIDO", "Código de Rastreio"]] if "Código de Rastreio" in df_rastreio.columns else df_rastreio
+            df_final = pd.merge(df_vendas, df_rastreio_min, on='ID_PEDIDO', how='inner')
         else:
-            df_final = pd.DataFrame()
+            st.warning("Coluna 'ID_PEDIDO' não identificada. Verifique o cabeçalho.")
+            st.stop()
 
         if not df_final.empty:
+            # Remove duplicatas de colunas
             df_final = df_final.loc[:, ~df_final.columns.duplicated()]
 
-            # --- FORMATAÇÃO DAS COLUNAS PRINCIPAIS ---
+            # --- FORMATAÇÃO ---
             if 'Cliente' in df_final.columns:
                 df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
             if 'Detento' in df_final.columns:
@@ -73,33 +84,28 @@ if input_vendas and input_rastreio:
                 df_final['Fone'] = df_final['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)))
 
             # --- ORGANIZAÇÃO DE COLUNAS ---
-            cols_prioridade = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
-            existentes = [c for c in cols_prioridade if c in df_final.columns]
-            extras = [c for c in df_final.columns if c not in existentes]
+            prioridade = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
+            existentes = [c for c in prioridade if c in df_final.columns]
+            restantes = [c for c in df_final.columns if c not in existentes]
             
-            df_envio = df_final[existentes + extras].copy()
+            df_envio = df_final[existentes + restantes].copy()
 
             # --- EXIBIÇÃO ---
-            st.success(f"✅ {len(df_envio)} pedidos prontos!")
+            st.success(f"✅ {len(df_envio)} pedidos prontos para a Jumbo!")
             st.dataframe(df_envio, use_container_width=True)
 
             # --- DISPARO ---
             st.divider()
-            webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+            webhook = st.text_input("URL do Webhook:", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
             
-            if st.button("Confirmar Envio para WhatsApp"):
-                if webhook.startswith("https://"):
-                    payload = df_envio.to_dict(orient='records')
-                    try:
-                        res = requests.post(webhook, json=payload, timeout=40)
-                        if res.status_code in [200, 201]:
-                            st.balloons()
-                            st.success(f"Enviado! {len(payload)} itens no n8n.")
-                        else:
-                            st.error(f"Erro {res.status_code}")
-                    except Exception as e:
-                        st.error(f"Erro: {e}")
+            if st.button("Confirmar Envio Total"):
+                payload = df_envio.to_dict(orient='records')
+                res = requests.post(webhook, json=payload, timeout=40)
+                if res.status_code in [200, 201]:
+                    st.balloons()
+                    st.success("Dados enviados com sucesso!")
         else:
-            st.warning("⚠️ IDs não coincidem.")
+            st.warning("⚠️ Nenhum cruzamento encontrado. Verifique se os números dos pedidos coincidem.")
+
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
