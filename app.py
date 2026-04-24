@@ -55,30 +55,29 @@ if input_vendas and input_rastreio:
         df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
         df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
 
-        # CRUZAMENTO (INNER JOIN)
-        df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
+        # --- CRUZAMENTO (INNER JOIN) ---
+        # Mantemos todas as colunas de vendas e trazemos o rastreio
+        df_final = pd.merge(df_vendas, df_rastreio, on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
-            # Seleciona apenas as colunas que conseguimos mapear
-            colunas_alvo = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
-            existentes = [c for c in colunas_alvo if c in df_final.columns]
-            df_envio = df_final[existentes].copy()
+            # Agora não filtramos mais 'colunas_alvo'. Enviamos o DataFrame completo!
+            df_envio = df_final.copy()
 
-            # --- FORMATAÇÃO ---
+            # --- FORMATAÇÃO DE SEGURANÇA (Apenas se as colunas existirem) ---
             if 'Cliente' in df_envio.columns:
-                df_envio['Cliente'] = df_envio['Cliente'].apply(tratar_primeiro_nome)
+                df_envio['Cliente_Tratado'] = df_envio['Cliente'].apply(tratar_primeiro_nome)
             if 'Detento' in df_envio.columns:
-                df_envio['Detento'] = df_envio['Detento'].apply(tratar_primeiro_nome)
+                df_envio['Detento_Tratado'] = df_envio['Detento'].apply(tratar_primeiro_nome)
             if 'Fone' in df_envio.columns:
                 df_envio['Fone'] = df_envio['Fone'].apply(lambda x: re.sub(r'\D', '', str(x)))
 
             # --- EXIBIÇÃO DA TABELA ---
-            st.success(f"✅ {len(df_envio)} pedidos prontos para conferência!")
+            st.success(f"✅ {len(df_envio)} pedidos prontos para envio total!")
             
-            st.subheader("📋 Auditoria de Dados (Primeiro Nome)")
-            # Exibição segura: só mostra o que existe
-            cols_show = [c for c in ['ID_PEDIDO', 'Cliente', 'Detento', 'Código de Rastreio'] if c in df_envio.columns]
-            st.dataframe(df_envio[cols_show], use_container_width=True)
+            st.subheader("📋 Auditoria de Dados (Visualização Simples)")
+            # Mostra apenas um resumo na tela, mas o envio será de TUDO
+            cols_preview = [c for c in ['ID_PEDIDO', 'Cliente', 'Código de Rastreio'] if c in df_envio.columns]
+            st.dataframe(df_envio[cols_preview], use_container_width=True)
 
             # --- SEÇÃO DE DISPARO ---
             st.divider()
@@ -86,14 +85,15 @@ if input_vendas and input_rastreio:
             
             if st.button("Confirmar Envio para WhatsApp"):
                 if webhook.startswith("https://"):
+                    # Aqui está a mágica: enviamos o dicionário completo de cada usuário
                     payload = df_envio.to_dict(orient='records')
                     try:
                         res = requests.post(webhook, json=payload, timeout=35)
                         if res.status_code in [200, 201]:
                             st.balloons()
-                            st.success("Dados enviados com sucesso para o n8n!")
+                            st.success(f"Sucesso! {len(payload)} usuários enviados com todos os dados para o n8n.")
                         else:
-                            st.error(f"Erro {res.status_code}: Mude o Webhook no n8n para POST.")
+                            st.error(f"Erro {res.status_code}: Verifique o Webhook.")
                     except Exception as e:
                         st.error(f"Erro de conexão: {e}")
                 else:
