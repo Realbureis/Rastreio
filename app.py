@@ -55,7 +55,8 @@ if input_vendas and input_rastreio:
                 if "CODIGO CLIENTE" in c_upper or "QUANT" in c_upper:
                     continue
                 
-                if "PEDIDO" in c_upper: mapa[col] = "ID_PEDIDO"
+                # Nome final solicitado: N. Pedido
+                if "PEDIDO" in c_upper: mapa[col] = "N. Pedido"
                 elif "CLIENTE" in c_upper: mapa[col] = "Cliente"
                 elif "DETENTO" in c_upper or "CADASTRA" in c_upper: mapa[col] = "Detento"
                 elif "RASTREIO" in c_upper: mapa[col] = "Código de Rastreio"
@@ -67,12 +68,12 @@ if input_vendas and input_rastreio:
         df_vendas = df_vendas.loc[:, ~df_vendas.columns.duplicated()]
         df_rastreio = df_rastreio.loc[:, ~df_rastreio.columns.duplicated()]
 
-        # Limpeza das chaves
-        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].astype(str).str.strip()
-        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].astype(str).str.strip()
+        # Limpeza das chaves usando o novo nome N. Pedido
+        df_vendas['N. Pedido'] = df_vendas['N. Pedido'].astype(str).str.strip()
+        df_rastreio['N. Pedido'] = df_rastreio['N. Pedido'].astype(str).str.strip()
 
         # CRUZAMENTO (INNER JOIN)
-        df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
+        df_final = pd.merge(df_vendas, df_rastreio[['N. Pedido', 'Código de Rastreio']], on='N. Pedido', how='inner')
 
         if not df_final.empty:
             # Atualização da coluna Fone Fixo
@@ -88,7 +89,7 @@ if input_vendas and input_rastreio:
                 if 'Detento' in df_final.columns:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-                # Mantém TODAS as colunas originais (incluindo Codigo Cliente)
+                # Mantém TODAS as colunas originais (incluindo Codigo Cliente e N. Pedido)
                 df_envio = df_final.copy()
 
                 # --- EXIBIÇÃO DA TABELA ---
