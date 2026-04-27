@@ -50,8 +50,9 @@ if input_vendas and input_rastreio:
             mapa = {}
             for col in df.columns:
                 c_upper = str(col).upper().strip()
-                # A trava: Não mapeia se a coluna for de QUANTIDADE
-                if "QUANT" in c_upper:
+                
+                # TRAVA: Não mapeia se for Código Cliente ou colunas de Quantidade
+                if "CODIGO CLIENTE" in c_upper or "QUANT" in c_upper:
                     continue
                 
                 if "PEDIDO" in c_upper: mapa[col] = "ID_PEDIDO"
@@ -66,18 +67,18 @@ if input_vendas and input_rastreio:
         df_vendas = df_vendas.loc[:, ~df_vendas.columns.duplicated()]
         df_rastreio = df_rastreio.loc[:, ~df_rastreio.columns.duplicated()]
 
-        # CORREÇÃO DO ERRO: Limpeza das chaves aplicada na COLUNA
+        # Limpeza das chaves
         df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].astype(str).str.strip()
         df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].astype(str).str.strip()
 
-        # CRUZAMENTO (INNER JOIN) - Mantendo TODAS as colunas de vendas
+        # CRUZAMENTO (INNER JOIN)
         df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
-            # --- ATUALIZAÇÃO DA COLUNA FONE FIXO ---
+            # Atualização da coluna Fone Fixo
             df_final['Fone Fixo'] = df_final.apply(processar_fone_jumbo, axis=1)
             
-            # FILTRO: Remove o lead se o 'Fone Fixo' for inválido/vazio
+            # FILTRO: Remove lead sem telefone
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
             if not df_final.empty:
@@ -87,7 +88,7 @@ if input_vendas and input_rastreio:
                 if 'Detento' in df_final.columns:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-                # Mantém TODAS as colunas originais para o payload (incluindo Quantidades)
+                # Mantém TODAS as colunas originais (incluindo Codigo Cliente)
                 df_envio = df_final.copy()
 
                 # --- EXIBIÇÃO DA TABELA ---
