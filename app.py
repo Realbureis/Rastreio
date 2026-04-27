@@ -8,18 +8,26 @@ import re
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
 
 def tratar_primeiro_nome(texto):
-    """Extrai apenas o primeiro nome em Title Case"""
+    """Extrai apenas o primeiro nome em Title Case de forma segura"""
     txt = str(texto).strip()
     if not txt or txt.lower() in ["nan", "none", "0", "-"]:
         return "N/A"
     return txt.split()[0].title()
 
-def limpar_telefone(valor):
-    """Remove ( ) - e espaços, retornando apenas números"""
-    if not valor or str(valor).lower() in ["nan", "none", "0", ""]:
-        return None
-    fone_limpo = re.sub(r'\D', '', str(valor))
-    return fone_limpo if len(fone_limpo) >= 8 else None
+def limpar_e_extrair_fone(row):
+    """Lógica de Prioridade: Fone Fixo > Celular. Limpa ( ) - e espaços."""
+    # Coleta os valores garantindo que sejam strings
+    fixo = str(row.get('Fone Fixo', '')).strip()
+    cel = str(row.get('Celular', '')).strip()
+    
+    # Prioridade solicitada: Fone Fixo primeiro
+    fone_bruto = fixo if fixo and fixo.lower() not in ["nan", "none", "0", ""] else cel
+    
+    # Limpa tudo que não for número (Remove parênteses, traços e espaços)
+    fone_limpo = re.sub(r'\D', '', fone_bruto)
+    
+    # Retorna o número se tiver tamanho mínimo, senão None para exclusão
+    return fone_limpo if fone_limpo and len(fone_limpo) >= 8 else None
 
 st.title("🚚 Disparador de Rastreios | Jumbo CDP")
 st.markdown("---")
@@ -35,15 +43,15 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo como String para preservar o formato original antes da limpeza
+        # Lendo os dados como string para evitar erros de tipo e perda de zeros à esquerda
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
-        # --- PADRONIZAÇÃO AUTOMÁTICA DE COLUNAS ---
+        # --- PADRONIZAÇÃO DE COLUNAS ---
         def auto_mapear(df):
             mapa = {}
             for col in df.columns:
-                c_upper = col.upper().strip()
+                c_upper = str(col).upper().strip()
                 if "PEDIDO" in c_upper: mapa[col] = "ID_PEDIDO"
                 elif "CLIENTE" in c_upper: mapa[col] = "Cliente"
                 elif "DETENTO" in c_upper or "CADASTRA" in c_upper: mapa[col] = "Detento"
@@ -53,58 +61,54 @@ if input_vendas and input_rastreio:
         df_vendas = auto_mapear(df_vendas)
         df_rastreio = auto_mapear(df_rastreio)
 
-        # Limpeza das chaves de cruzamento
-        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
-        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
-
-        # --- CRUZAMENTO (INNER JOIN) ---
-        # Cruzamos o rastreio com a base TOTAL de vendas para não perder nenhuma coluna
+        # Cruzamento pelo ID_PEDIDO
+        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].astype(str).str.strip()
+        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].astype(str).str.strip()
+        
+        # Merge mantendo todas as colunas de vendas
         df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
-            # --- LÓGICA DE TELEFONE (CELULAR > FONE FIXO) ---
-            # Limpamos ambos os campos que vêm com (11) 91111-1111
-            df_final['celular_limpo'] = df_final.get('Celular', '').apply(limpar_telefone)
-            df_final['fixo_limpo'] = df_final.get('Fone Fixo', '').apply(limpar_telefone)
+            # 1. Aplicação da Prioridade de Telefone (Fixo > Celular) e Limpeza de (11) 91111-1111
+            df_final['Fone'] = df_final.apply(limpar_e_extrair_fone, axis=1)
 
-            # Define a coluna 'Fone' final: se celular_limpo existir use ele, senão use fixo_limpo
-            df_final['Fone'] = df_final['celular_limpo'].fillna(df_final['fixo_limpo'])
-
-            # FILTRO: Remove quem não tem nenhum telefone válido (None)
+            # 2. CONDIÇÃO: Não inserir lead se não tiver nenhum telefone
             df_final = df_final.dropna(subset=['Fone']).copy()
 
             if not df_final.empty:
-                # --- FORMATAÇÃO DE NOMES ---
+                # 3. Tratamento de Nomes
                 if 'Cliente' in df_final.columns:
                     df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
                 if 'Detento' in df_final.columns:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-                # --- ORGANIZAÇÃO DE COLUNAS ---
-                # Colocamos o que você audita no início, mas o resto vai junto!
+                # 4. Organização (VIPs primeiro, mas com TODAS as colunas para o BigQuery)
                 vips = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
                 cols_vips = [c for c in vips if c in df_final.columns]
-                outras_colunas = [c for c in df_final.columns if c not in cols_vips and c not in ['celular_limpo', 'fixo_limpo']]
+                outras_cols = [c for c in df_final.columns if c not in cols_vips]
                 
-                df_envio = df_final[cols_vips + outras_colunas].copy()
+                df_envio = df_final[cols_vips + outras_cols].copy()
 
-                # --- EXIBIÇÃO ---
-                st.success(f"✅ {len(df_envio)} pedidos cruzados e validados!")
+                st.success(f"✅ {len(df_envio)} pedidos processados com prioridade no Fone Fixo!")
+                
+                # Preview com todas as colunas preenchidas
                 st.dataframe(df_envio, use_container_width=True)
 
-                # --- DISPARO ---
+                # --- SEÇÃO DE DISPARO ---
                 st.divider()
-                webhook = st.text_input("URL do Webhook:", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+                webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
-                if st.button("Confirmar Envio Total para n8n"):
+                if st.button("Confirmar Envio para WhatsApp"):
                     payload = df_envio.to_dict(orient='records')
                     res = requests.post(webhook, json=payload, timeout=45)
                     if res.status_code in [200, 201]:
                         st.balloons()
-                        st.success(f"Show! {len(payload)} usuários enviados com todos os dados.")
+                        st.success(f"Sucesso! {len(payload)} leads enviados.")
+                    else:
+                        st.error(f"Erro {res.status_code}")
             else:
-                st.warning("⚠️ Nenhum lead com telefone válido após a limpeza dos caracteres.")
+                st.warning("⚠️ Nenhum lead com telefone válido encontrado após o cruzamento.")
         else:
-            st.warning("⚠️ Nenhum pedido coincidente encontrado entre as listas.")
+            st.warning("⚠️ Nenhum pedido coincidente encontrado.")
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
