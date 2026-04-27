@@ -16,7 +16,7 @@ def tratar_primeiro_nome(texto):
 
 def processar_fone_jumbo(row):
     """Fallback Fixo > Celular | Limpa | Adiciona 55"""
-    # Buscamos os valores originais
+    # Buscamos os valores originais garantindo que existam
     fixo = str(row.get('Fone Fixo', '')).strip()
     cel = str(row.get('Celular', '')).strip()
     
@@ -43,7 +43,7 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados como String (Sua base original funcional)
+        # Lendo os dados como String para não perder nada
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
@@ -58,40 +58,38 @@ if input_vendas and input_rastreio:
                 elif "RASTREIO" in c_upper: mapa[col] = "Código de Rastreio"
             return df.rename(columns=mapa)
 
+        # Mapeamos sem perder as colunas originais
         df_vendas = auto_mapear(df_vendas)
         df_rastreio = auto_mapear(df_rastreio)
 
-        df_vendas = df_vendas.loc[:, ~df_vendas.columns.duplicated()]
-        df_rastreio = df_rastreio.loc[:, ~df_rastreio.columns.duplicated()]
-
+        # Limpeza das chaves para o cruzamento
         df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
         df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
 
         # CRUZAMENTO (INNER JOIN)
+        # Importante: O 'df_vendas' aqui entra inteiro, com todas as suas colunas originais.
         df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
             # --- ATUALIZAÇÃO DA COLUNA FONE FIXO ---
-            # Aplicamos a lógica e substituímos diretamente na coluna que você já usa no n8n
+            # Aplicamos a lógica e substituímos diretamente na coluna original
             df_final['Fone Fixo'] = df_final.apply(processar_fone_jumbo, axis=1)
             
             # FILTRO: Remove o lead se o 'Fone Fixo' resultar em None (sem contato)
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
-            # Formatação de nomes
+            # Formatação de nomes (apenas se as colunas existirem)
             if 'Cliente' in df_final.columns:
                 df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
             if 'Detento' in df_final.columns:
                 df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-            # Organização das colunas para o Preview e Envio (Tudo incluso)
-            colunas_vips = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone Fixo', 'Código de Rastreio']
-            existentes = [c for c in colunas_vips if c in df_final.columns]
-            extras = [c for c in df_final.columns if c not in existentes]
-            df_envio = df_final[existentes + extras].copy()
+            # --- MANUTENÇÃO DE TODAS AS COLUNAS ---
+            # Aqui garantimos que o dataframe final seja exatamente o df_final sem filtros de colunas
+            df_envio = df_final.copy()
 
             # --- EXIBIÇÃO ---
-            st.success(f"✅ {len(df_envio)} pedidos processados e prontos!")
+            st.success(f"✅ {len(df_envio)} pedidos processados com TODAS as colunas!")
             st.dataframe(df_envio, use_container_width=True)
 
             # --- DISPARO ---
@@ -104,7 +102,7 @@ if input_vendas and input_rastreio:
                     res = requests.post(webhook, json=payload, timeout=35)
                     if res.status_code in [200, 201]:
                         st.balloons()
-                        st.success("Dados enviados com sucesso!")
+                        st.success(f"Dados enviados! Total de colunas: {len(df_envio.columns)}")
                     else:
                         st.error(f"Erro {res.status_code}")
                 except Exception as e:
