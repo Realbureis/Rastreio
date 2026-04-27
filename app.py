@@ -16,7 +16,6 @@ def tratar_primeiro_nome(texto):
 
 def processar_fone_jumbo(row):
     """Fallback Fixo > Celular | Limpa | Adiciona 55"""
-    # Buscamos os valores originais garantindo que existam
     fixo = str(row.get('Fone Fixo', '')).strip()
     cel = str(row.get('Celular', '')).strip()
     
@@ -25,7 +24,6 @@ def processar_fone_jumbo(row):
     limpo = re.sub(r'\D', '', bruto)
     
     if limpo and len(limpo) >= 8:
-        # Garante o formato 55XXXXXXXXXXX
         return '55' + limpo if not limpo.startswith('55') else limpo
     return None
 
@@ -43,7 +41,7 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados como String para não perder nada
+        # Lendo os dados como String (Mantendo sua base original funcional)
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
@@ -51,62 +49,63 @@ if input_vendas and input_rastreio:
         def auto_mapear(df):
             mapa = {}
             for col in df.columns:
-                c_upper = col.upper().strip()
+                c_upper = str(col).upper().strip()
                 if "PEDIDO" in c_upper: mapa[col] = "ID_PEDIDO"
                 elif "CLIENTE" in c_upper: mapa[col] = "Cliente"
                 elif "DETENTO" in c_upper or "CADASTRA" in c_upper: mapa[col] = "Detento"
                 elif "RASTREIO" in c_upper: mapa[col] = "Código de Rastreio"
             return df.rename(columns=mapa)
 
-        # Mapeamos sem perder as colunas originais
         df_vendas = auto_mapear(df_vendas)
         df_rastreio = auto_mapear(df_rastreio)
 
-        # Limpeza das chaves para o cruzamento
-        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].str.strip()
-        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
+        df_vendas = df_vendas.loc[:, ~df_vendas.columns.duplicated()]
+        df_rastreio = df_rastreio.loc[:, ~df_rastreio.columns.duplicated()]
 
-        # CRUZAMENTO (INNER JOIN)
-        # Importante: O 'df_vendas' aqui entra inteiro, com todas as suas colunas originais.
+        # CORREÇÃO DO ERRO: Limpeza das chaves aplicada na COLUNA
+        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].astype(str).str.strip()
+        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].astype(str).str.strip()
+
+        # CRUZAMENTO (INNER JOIN) - Mantendo TODAS as colunas de vendas
         df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
             # --- ATUALIZAÇÃO DA COLUNA FONE FIXO ---
-            # Aplicamos a lógica e substituímos diretamente na coluna original
+            # Aqui a lógica limpa e insere o 55 diretamente na coluna Fone Fixo
             df_final['Fone Fixo'] = df_final.apply(processar_fone_jumbo, axis=1)
             
-            # FILTRO: Remove o lead se o 'Fone Fixo' resultar em None (sem contato)
+            # FILTRO: Remove o lead se o 'Fone Fixo' for inválido/vazio
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
-            # Formatação de nomes (apenas se as colunas existirem)
-            if 'Cliente' in df_final.columns:
-                df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
-            if 'Detento' in df_final.columns:
-                df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
+            if not df_final.empty:
+                # Formatação de nomes (na tabela final agora com todas as colunas)
+                if 'Cliente' in df_final.columns:
+                    df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
+                if 'Detento' in df_final.columns:
+                    df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-            # --- MANUTENÇÃO DE TODAS AS COLUNAS ---
-            # Aqui garantimos que o dataframe final seja exatamente o df_final sem filtros de colunas
-            df_envio = df_final.copy()
+                # Mantém TODAS as colunas originais para o payload
+                df_envio = df_final.copy()
 
-            # --- EXIBIÇÃO ---
-            st.success(f"✅ {len(df_envio)} pedidos processados com TODAS as colunas!")
-            st.dataframe(df_envio, use_container_width=True)
+                # --- EXIBIÇÃO DA TABELA ---
+                st.success(f"✅ {len(df_envio)} pedidos prontos!")
+                st.dataframe(df_envio, use_container_width=True)
 
-            # --- DISPARO ---
-            st.divider()
-            webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
-            
-            if st.button("Confirmar Envio para WhatsApp"):
-                payload = df_envio.to_dict(orient='records')
-                try:
-                    res = requests.post(webhook, json=payload, timeout=35)
-                    if res.status_code in [200, 201]:
-                        st.balloons()
-                        st.success(f"Dados enviados! Total de colunas: {len(df_envio.columns)}")
-                    else:
-                        st.error(f"Erro {res.status_code}")
-                except Exception as e:
-                    st.error(f"Erro de conexão: {e}")
+                # --- SEÇÃO DE DISPARO ---
+                st.divider()
+                webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+                
+                if st.button("Confirmar Envio para WhatsApp"):
+                    payload = df_envio.to_dict(orient='records')
+                    try:
+                        res = requests.post(webhook, json=payload, timeout=45)
+                        if res.status_code in [200, 201]:
+                            st.balloons()
+                            st.success("Dados enviados com sucesso!")
+                        else:
+                            st.error(f"Erro {res.status_code}")
+                    except Exception as e:
+                        st.error(f"Erro de conexão: {e}")
         else:
             st.warning("⚠️ Nenhum pedido coincidente encontrado.")
     except Exception as e:
