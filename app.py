@@ -45,54 +45,53 @@ if input_vendas and input_rastreio:
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
-        # Criamos cópias para mapeamento sem alterar os nomes originais das colunas que você precisa
-        df_vendas_map = df_vendas.copy()
-        
-        # Mapeamento apenas para identificar as chaves de cruzamento e nomes
-        mapa = {}
-        for col in df_vendas.columns:
-            c_upper = str(col).upper().strip()
-            if "PEDIDO" in c_upper and "QUANT" not in c_upper: mapa[col] = "ID_PEDIDO"
-            elif "CLIENTE" in c_upper and "QUANT" not in c_upper: mapa[col] = "Cliente_Formatado"
-            elif "DETENTO" in c_upper: mapa[col] = "Detento_Formatado"
+        # --- PADRONIZAÇÃO AUTOMÁTICA DE COLUNAS ---
+        def auto_mapear(df):
+            mapa = {}
+            for col in df.columns:
+                c_upper = str(col).upper().strip()
+                # A trava: Não mapeia se a coluna for de QUANTIDADE
+                if "QUANT" in c_upper:
+                    continue
+                
+                if "PEDIDO" in c_upper: mapa[col] = "ID_PEDIDO"
+                elif "CLIENTE" in c_upper: mapa[col] = "Cliente"
+                elif "DETENTO" in c_upper or "CADASTRA" in c_upper: mapa[col] = "Detento"
+                elif "RASTREIO" in c_upper: mapa[col] = "Código de Rastreio"
+            return df.rename(columns=mapa)
 
-        df_vendas_map = df_vendas_map.rename(columns=mapa)
-        
-        # Mapeamento do Rastreio
-        mapa_rastreio = {}
-        for col in df_rastreio.columns:
-            if "PEDIDO" in str(col).upper(): mapa_rastreio[col] = "ID_PEDIDO"
-            if "RASTREIO" in str(col).upper(): mapa_rastreio[col] = "Código de Rastreio"
-        
-        df_rastreio_map = df_rastreio.rename(columns=mapa_rastreio)
+        df_vendas = auto_mapear(df_vendas)
+        df_rastreio = auto_mapear(df_rastreio)
 
-        # IDs limpos para o Join
-        df_vendas_map['ID_PEDIDO'] = df_vendas_map['ID_PEDIDO'].astype(str).str.strip()
-        df_rastreio_map['ID_PEDIDO'] = df_rastreio_map['ID_PEDIDO'].astype(str).str.strip()
+        df_vendas = df_vendas.loc[:, ~df_vendas.columns.duplicated()]
+        df_rastreio = df_rastreio.loc[:, ~df_rastreio.columns.duplicated()]
 
-        # CRUZAMENTO (INNER JOIN)
-        # Unimos as tabelas mantendo ABSOLUTAMENTE TODAS as colunas originais de vendas
-        df_final = pd.merge(df_vendas_map, df_rastreio_map[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
+        # CORREÇÃO DO ERRO: Limpeza das chaves aplicada na COLUNA
+        df_vendas['ID_PEDIDO'] = df_vendas['ID_PEDIDO'].astype(str).str.strip()
+        df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].astype(str).str.strip()
+
+        # CRUZAMENTO (INNER JOIN) - Mantendo TODAS as colunas de vendas
+        df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
             # --- ATUALIZAÇÃO DA COLUNA FONE FIXO ---
             df_final['Fone Fixo'] = df_final.apply(processar_fone_jumbo, axis=1)
             
-            # FILTRO: Remove o lead se o 'Fone Fixo' for inválido
+            # FILTRO: Remove o lead se o 'Fone Fixo' for inválido/vazio
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
             if not df_final.empty:
-                # Formatação de nomes em colunas auxiliares (opcional, mantendo as originais)
-                if 'Cliente_Formatado' in df_final.columns:
-                    df_final['Cliente_Formatado'] = df_final['Cliente_Formatado'].apply(tratar_primeiro_nome)
-                if 'Detento_Formatado' in df_final.columns:
-                    df_final['Detento_Formatado'] = df_final['Detento_Formatado'].apply(tratar_primeiro_nome)
+                # Formatação de nomes
+                if 'Cliente' in df_final.columns:
+                    df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
+                if 'Detento' in df_final.columns:
+                    df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-                # Removemos apenas as colunas auxiliares de mapeamento para não duplicar dados
+                # Mantém TODAS as colunas originais para o payload (incluindo Quantidades)
                 df_envio = df_final.copy()
 
                 # --- EXIBIÇÃO DA TABELA ---
-                st.success(f"✅ {len(df_envio)} pedidos processados com sucesso!")
+                st.success(f"✅ {len(df_envio)} pedidos prontos!")
                 st.dataframe(df_envio, use_container_width=True)
 
                 # --- SEÇÃO DE DISPARO ---
@@ -105,7 +104,7 @@ if input_vendas and input_rastreio:
                         res = requests.post(webhook, json=payload, timeout=45)
                         if res.status_code in [200, 201]:
                             st.balloons()
-                            st.success(f"Enviado! Todas as colunas (incluindo Quantidades) foram processadas.")
+                            st.success("Dados enviados com sucesso!")
                         else:
                             st.error(f"Erro {res.status_code}")
                     except Exception as e:
