@@ -16,6 +16,7 @@ def tratar_primeiro_nome(texto):
 
 def processar_fone_jumbo(row):
     """Fallback Fixo > Celular | Limpa | Adiciona 55"""
+    # Buscamos os valores originais
     fixo = str(row.get('Fone Fixo', '')).strip()
     cel = str(row.get('Celular', '')).strip()
     
@@ -24,6 +25,7 @@ def processar_fone_jumbo(row):
     limpo = re.sub(r'\D', '', bruto)
     
     if limpo and len(limpo) >= 8:
+        # Garante o formato 55XXXXXXXXXXX
         return '55' + limpo if not limpo.startswith('55') else limpo
     return None
 
@@ -41,7 +43,7 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
-        # Lendo os dados como String (Mantendo sua base original)
+        # Lendo os dados como String (Sua base original funcional)
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
@@ -66,31 +68,33 @@ if input_vendas and input_rastreio:
         df_rastreio['ID_PEDIDO'] = df_rastreio['ID_PEDIDO'].str.strip()
 
         # CRUZAMENTO (INNER JOIN)
-        # Pegamos o ID_PEDIDO e Código de Rastreio, mas fazemos o join na base TOTAL de vendas
         df_final = pd.merge(df_vendas, df_rastreio[['ID_PEDIDO', 'Código de Rastreio']], on='ID_PEDIDO', how='inner')
 
         if not df_final.empty:
-            # --- NOVAS CONDIÇÕES ---
-            df_final['Fone'] = df_final.apply(processar_fone_jumbo, axis=1)
-            df_final = df_final.dropna(subset=['Fone']).copy() # Filtro de quem não tem telefone
+            # --- ATUALIZAÇÃO DA COLUNA FONE FIXO ---
+            # Aplicamos a lógica e substituímos diretamente na coluna que você já usa no n8n
+            df_final['Fone Fixo'] = df_final.apply(processar_fone_jumbo, axis=1)
+            
+            # FILTRO: Remove o lead se o 'Fone Fixo' resultar em None (sem contato)
+            df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
-            # Formatação de nomes (na tabela final agora com todas as colunas)
+            # Formatação de nomes
             if 'Cliente' in df_final.columns:
                 df_final['Cliente'] = df_final['Cliente'].apply(tratar_primeiro_nome)
             if 'Detento' in df_final.columns:
                 df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-            # Organização das colunas (Vips primeiro, o resto tudo depois)
-            colunas_vips = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone', 'Código de Rastreio']
+            # Organização das colunas para o Preview e Envio (Tudo incluso)
+            colunas_vips = ['ID_PEDIDO', 'Cliente', 'Detento', 'Fone Fixo', 'Código de Rastreio']
             existentes = [c for c in colunas_vips if c in df_final.columns]
             extras = [c for c in df_final.columns if c not in existentes]
             df_envio = df_final[existentes + extras].copy()
 
-            # --- EXIBIÇÃO DA TABELA ---
-            st.success(f"✅ {len(df_envio)} pedidos prontos!")
+            # --- EXIBIÇÃO ---
+            st.success(f"✅ {len(df_envio)} pedidos processados e prontos!")
             st.dataframe(df_envio, use_container_width=True)
 
-            # --- SEÇÃO DE DISPARO ---
+            # --- DISPARO ---
             st.divider()
             webhook = st.text_input("URL do Webhook (POST):", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
             
