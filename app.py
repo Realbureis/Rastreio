@@ -106,7 +106,7 @@ if input_vendas and input_rastreio:
                 st.dataframe(df_envio, use_container_width=True)
 
                 st.divider()
-                webhook = st.text_input("URL do Webhook:", value="https://jumbocdp.app.n8n.cloud/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+                webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
                 if st.button("Confirmar Envio"):
                     payload = df_envio.to_dict(orient='records')
