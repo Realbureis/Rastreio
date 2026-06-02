@@ -3,7 +3,6 @@ import pandas as pd
 import io
 import requests
 import re
-import time
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
@@ -110,43 +109,13 @@ if input_vendas and input_rastreio:
                 webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
                 if st.button("Confirmar Envio"):
-                    payloads = df_envio.to_dict(orient='records')
-                    total_pedidos = len(payloads)
-                    
-                    # Elementos visuais para feedback do usuário
-                    progresso_bar = st.progress(0)
-                    status_texto = st.empty()
-                    
-                    sucessos = 0
-                    erros = 0
-                    
-                    for index, item in enumerate(payloads):
-                        # Atualiza a interface gráfica
-                        status_texto.text(f"Enviando pedido {index + 1} de {total_pedidos} (Pedido N.: {item.get('N. Pedido', '?')})...")
-                        progresso_bar.progress((index + 1) / total_pedidos)
-                        
-                        try:
-                            # Envia registro por registro com um timeout seguro de 30s por linha
-                            res = requests.post(webhook, json=item, timeout=30)
-                            if res.status_code in [200, 201]:
-                                sucessos += 1
-                            else:
-                                erros += 1
-                        except Exception:
-                            erros += 1
-                        
-                        # Pequena pausa opcional para não metralhar o servidor (0.1 segundos)
-                        time.sleep(0.1)
-                    
-                    # Finalização do processo
-                    status_texto.empty()
-                    if erros == 0:
+                    payload = df_envio.to_dict(orient='records')
+                    res = requests.post(webhook, json=payload, timeout=45)
+                    if res.status_code in [200, 201]:
                         st.balloons()
-                        st.success(f"🚀 Todos os {sucessos} pedidos foram enviados com sucesso para o n8n!")
-                    elif sucessos > 0:
-                        st.warning(f"Processo concluído com alertas: {sucessos} enviados com sucesso, mas {erros} falharam. Verifique o n8n.")
+                        st.success("Dados enviados! Datas e Valores agora estão no padrão do BigQuery.")
                     else:
-                        st.error("Falha crítica: Nenhum pedido pôde ser entregue ao n8n. O servidor de webhook está offline?")
-                        
+                        st.error(f"Erro {res.status_code}")
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
+
