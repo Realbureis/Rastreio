@@ -109,13 +109,25 @@ if input_vendas and input_rastreio:
                 webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
                 if st.button("Confirmar Envio"):
-                    payload = df_envio.to_dict(orient='records')
-                    res = requests.post(webhook, json=payload, timeout=45)
-                    if res.status_code in [200, 201, 202]:
-                        st.balloons()
-                        st.success("Dados enviados! Datas e Valores agora estão no padrão do BigQuery.")
-                    else:
-                        st.error(f"Erro {res.status_code}")
+    # Transforma o dataframe inteiro em um blocão só
+    payload = df_envio.to_dict(orient='records')
+    
+    status_texto = st.empty()
+    status_texto.text("Enviando lote completo para o n8n...")
+    
+    try:
+        # Envia tudo de uma vez para a URL de produção (sem o -test)
+        # Tiramos o timeout de 45s para a VPS ter tempo de processar tudo
+        res = requests.post(webhook, json=payload, timeout=None)
+        
+        # Como adicionamos o 202, a produção vai responder na hora!
+        if res.status_code in [200, 201, 202]:
+            st.balloons()
+            st.success(f"🚀 Todos os {len(payload)} pedidos foram entregues com sucesso ao n8n!")
+        else:
+            st.error(f"O servidor recusou o lote. Status: {res.status_code}")
+            
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
-
+        st.error(f"Erro de conexão na rede da VPS: {e}")
+        
+    status_texto.empty()
