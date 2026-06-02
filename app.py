@@ -111,7 +111,7 @@ if input_vendas and input_rastreio:
                 if st.button("Confirmar Envio"):
                     payload = df_envio.to_dict(orient='records')
                     res = requests.post(webhook, json=payload, timeout=45)
-                    if res.status_code in [200, 201]:
+                    if res.status_code in [200, 201, 202]:
                         st.balloons()
                         st.success("Dados enviados! Datas e Valores agora estão no padrão do BigQuery.")
                     else:
