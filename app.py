@@ -106,34 +106,16 @@ if input_vendas and input_rastreio:
                 st.dataframe(df_envio, use_container_width=True)
 
                 st.divider()
-                
-                # Input da URL do Webhook
-                webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+                webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
                 if st.button("Confirmar Envio"):
-                    # Transforma a tabela inteira em um único bloco de dados (Array de objetos)
                     payload = df_envio.to_dict(orient='records')
-                    
-                    status_texto = st.empty()
-                    status_texto.markdown("⏳ **Enviando lote completo para o n8n... Por favor, aguarde.**")
-                    
-                    try:
-                        # Envia o pacote completo em uma única conexão HTTPS sem limite de timeout
-                        res = requests.post(webhook, json=payload, timeout=None)
-                        
-                        # Limpa o texto de carregamento
-                        status_texto.empty()
-                        
-                        # Aceita 200/201 (Teste) e 202 (Produção do n8n)
-                        if res.status_code in [200, 201, 202]:
-                            st.balloons()
-                            st.success(f"🚀 Sucesso! Todos os {len(payload)} pedidos foram entregues e estão sendo processados.")
-                        else:
-                            st.error(f"O servidor do n8n recusou os dados. Código de status: {res.status_code}")
-                            
-                    except requests.exceptions.RequestException as e:
-                        status_texto.empty()
-                        st.error(f"Erro crítico de rede na conexão com a VPS: {e}")
-                        
+                    res = requests.post(webhook, json=payload, timeout=45)
+                    if res.status_code in [200, 201]:
+                        st.balloons()
+                        st.success("Dados enviados! Datas e Valores agora estão no padrão do BigQuery.")
+                    else:
+                        st.error(f"Erro {res.status_code}")
     except Exception as e:
-        st.error(f"Erro no processamento interno: {e}")
+        st.error(f"Erro no processamento: {e}")
+
