@@ -7,7 +7,7 @@ import re
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
 
 def tratar_primeiro_nome(texto):
-    """Extrai apenas o primeiro nome em Title Case"""
+    """Extrai apenas o primeiro nome em Title Case corrigindo problemas de encoding"""
     txt = str(texto).strip()
     if not txt or txt.lower() in ["nan", "none", "0", "-"]:
         return "N/A"
@@ -16,7 +16,6 @@ def tratar_primeiro_nome(texto):
 def formatar_data_bq(texto):
     """Converte DD/MM/YYYY para YYYY-MM-DD para o BigQuery entender como DATE"""
     txt = str(texto).strip()
-    # Procura o padrão de data brasileira 00/00/0000
     match = re.search(r'(\d{2})/(\d{2})/(\d{4})', txt)
     if match:
         dia, mes, ano = match.groups()
@@ -33,13 +32,25 @@ def limpar_valor_monetario(valor):
     return v
 
 def processar_fone_jumbo(row):
-    """Fallback Fixo > Celular | Limpa | Adiciona 55"""
-    fixo = str(row.get('Fone Fixo', '')).strip()
-    cel = str(row.get('Celular', '')).strip()
-    bruto = fixo if fixo and fixo.lower() not in ["nan", "none", "0", ""] else cel
+    """Limpa o telefone de forma cirúrgica mantendo apenas os números e inserindo o 55"""
+    # Coleta os campos brutos convertendo para string limpa
+    fixo = str(row.get('Fone Fixo', '')).strip().split('.')[0]
+    cel = str(row.get('Celular', '')).strip().split('.')[0]
+    
+    # Define qual campo usar (Prioriza Celular se existir, pois é disparador de WhatsApp)
+    bruto = cel if cel and cel.lower() not in ["nan", "none", "0", ""] else fixo
+    
+    # Remove absolutamente tudo o que não for número (parênteses, traços, espaços)
     limpo = re.sub(r'\D', '', bruto)
-    if limpo and len(limpo) >= 8:
-        return '55' + limpo if not limpo.startswith('55') else limpo
+    
+    # Se o número ficou limpo e tem tamanho válido de telefone brasileiro (8 a 11 dígitos)
+    if limpo and 8 <= len(limpo) <= 12:
+        # Se já começar com 55, apenas retorna
+        if limpo.startswith('55') and len(limpo) >= 10:
+            return limpo
+        # Caso contrário, adiciona o código do país
+        return '55' + limpo
+        
     return None
 
 st.title("🚚 Disparador de Rastreios | Jumbo CDP")
@@ -55,6 +66,7 @@ with col2:
 
 if input_vendas and input_rastreio:
     try:
+        # Lendo os dados forçando o tratamento de caracteres especiais e forçando tudo como TEXTO (string)
         df_vendas = pd.read_csv(io.StringIO(input_vendas), sep='\t', dtype=str).fillna("")
         df_rastreio = pd.read_csv(io.StringIO(input_rastreio), sep='\t', dtype=str).fillna("")
 
@@ -81,6 +93,7 @@ if input_vendas and input_rastreio:
         df_final = pd.merge(df_vendas, df_rastreio[['N. Pedido', 'Código de Rastreio']], on='N. Pedido', how='inner')
 
         if not df_final.empty:
+            # Processa e sanitiza os números de telefone
             df_final['Fone Fixo'] = df_final.apply(processar_fone_jumbo, axis=1)
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
@@ -105,18 +118,17 @@ if input_vendas and input_rastreio:
                 st.divider()
                 st.subheader("3. Exportar para o Google Sheets")
                 
-                # Força a criação do CSV separado por ponto e vírgula com encoding correto
-                csv_puro = df_envio.to_csv(index=False, sep=';', encoding='utf-8-sig')
+                # Converte o dataframe para uma tabela HTML limpa e injeta a tag de codificação UTF-8
+                # Isso impede o navegador e o Google Sheets de criarem o símbolo de raiz quadrada nos acentos
+                html_table = df_envio.to_html(index=False, border=1, justify="left")
+                html_final = f'<meta charset="utf-8">\n{html_table}'
                 
-                # Injeta a instrução 'sep=;' na primeira linha para o Excel/Sheets abrirem direto em colunas
-                csv_com_instrucao = f"sep=;\n{csv_puro}"
-                
-                # Botão de download nativo
+                # Botão de download configurado para entregar o formato HTML de tabela com UTF-8 forçado
                 st.download_button(
                     label="📥 Baixar Dados Formatados para Google Sheets",
-                    data=csv_com_instrucao,
-                    file_name="rastreio_jumbo_formatado.csv",
-                    mime="text/csv",
+                    data=html_final,
+                    file_name="rastreio_jumbo.html",
+                    mime="text/html",
                     use_container_width=True
                 )
                 
