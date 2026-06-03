@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import requests
 import re
 
 # 1. Configuração da Página
@@ -32,11 +33,10 @@ def limpar_valor_monetario(valor):
     return v
 
 def processar_fone_jumbo(row):
-    """Limpa o telefone mantendo apenas os números e adiciona formatação de texto invisível"""
+    """Limpa o telefone mantendo apenas os números e garante o 55 na frente"""
     fixo = str(row.get('Fone Fixo', '')).strip().split('.')[0]
     cel = str(row.get('Celular', '')).strip().split('.')[0]
     
-    # Se o número bruto já estiver em notação científica por erro de input (ex: 5.51E+12), limpa o padrão
     if 'E+' in fixo.upper(): fixo = ""
     if 'E+' in cel.upper(): cel = ""
     
@@ -46,9 +46,7 @@ def processar_fone_jumbo(row):
     if limpo and 8 <= len(limpo) <= 12:
         if not limpo.startswith('55'):
             limpo = '55' + limpo
-        
-        # 💡 O TRUQUE: Injeta uma aspa simples na frente para o Sheets tratar estritamente como texto
-        return f"'{limpo}"
+        return limpo  # Aqui enviamos o número limpo (o n8n insere como texto no Sheets)
         
     return None
 
@@ -108,29 +106,29 @@ if input_vendas and input_rastreio:
                 if 'Detento' in df_final.columns:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
-                # Força a coluna do código de rastreio a manter formatação textual simples se necessário
-                if 'Código de Rastreio' in df_final.columns:
-                    df_final['Código de Rastreio'] = df_final['Código de Rastreio'].apply(lambda x: f"'{str(x).strip()}" if str(x).strip().isdigit() else str(x).strip())
-
                 df_envio = df_final.copy()
-                st.success(f"✅ {len(df_envio)} pedidos processados com sucesso!")
+                st.success(f"✅ {len(df_envio)} pedidos prontos para envio!")
                 st.dataframe(df_envio, use_container_width=True)
 
                 st.divider()
-                st.subheader("3. Exportar para o Google Sheets")
+                st.subheader("3. Enviar Direto para o n8n ➡️ Google Sheets")
                 
-                with pd.option_context('display.max_rows', None):
-                    html_table = df_envio.to_html(index=False, border=1, justify="left")
+                # Input para colocar a URL do Webhook do seu n8n da VPS
+                webhook_url = st.text_input("URL do Webhook do n8n:", value="https://n8n.corcaqui.com.br/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
-                html_final = f'<meta charset="utf-8">\n{html_table}'
-                
-                st.download_button(
-                    label="📥 Baixar Dados Formatados para Google Sheets",
-                    data=html_final,
-                    file_name="rastreio_jumbo.html",
-                    mime="text/html",
-                    use_container_width=True
-                )
+                if st.button("🚀 Confirmar e Injetar na Planilha", use_container_width=True):
+                    with st.spinner("Enviando dados para a planilha via n8n..."):
+                        # Transforma o DataFrame em uma lista de dicionários JSON limpos
+                        payload = df_envio.to_dict(orient='records')
+                        
+                        # Faz a requisição HTTP POST para a sua VPS
+                        res = requests.post(webhook_url, json=payload, timeout=60)
+                        
+                        if res.status_code in [200, 201]:
+                            st.balloons()
+                            st.success("🔥 Sucesso! Os dados foram injetados direto na planilha 'Rastreio' via n8n!")
+                        else:
+                            st.error(f"Falha no envio. Código de status: {res.status_code}. Resposta: {res.text}")
                 
     except Exception as e:
         st.error(f"Erro no processamento interno: {e}")
