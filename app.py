@@ -1,18 +1,11 @@
 import streamlit as st
 import pandas as pd
 import io
+import requests
 import re
-import gspread
-from gspread_dataframe import set_with_dataframe
-from google.oauth2.service_account import Credentials
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
-
-# --- CONFIGURAÇÕES FIXAS DO GOOGLE SHEETS ---
-ID_PLANILHA = "1Sz7AcX7-sjejb4EfvJ9bIGsUovHaQovnAh0NNDMfnP8"
-NOME_ABA = "Página 1"
-CAMINHO_JSON_CREDS = "credentials.json"  # O arquivo JSON deve estar na mesma pasta do script
 
 def tratar_primeiro_nome(texto):
     """Extrai apenas o primeiro nome em Title Case"""
@@ -24,6 +17,7 @@ def tratar_primeiro_nome(texto):
 def formatar_data_bq(texto):
     """Converte DD/MM/YYYY para YYYY-MM-DD para o BigQuery entender como DATE"""
     txt = str(texto).strip()
+    # Procura o padrão de data brasileira 00/00/0000
     match = re.search(r'(\d{2})/(\d{2})/(\d{4})', txt)
     if match:
         dia, mes, ano = match.groups()
@@ -49,43 +43,8 @@ def processar_fone_jumbo(row):
         return '55' + limpo if not limpo.startswith('55') else limpo
     return None
 
-def enviar_para_sheets(df, spreadsheet_id, sheet_name, creds_path):
-    """Autentica na API do Google, limpa a aba atual e escreve os novos dados (sobrescreve)"""
-    escopos = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    
-    # Carrega as credenciais da Service Account
-    credenciais = Credentials.from_service_account_file(creds_path, scopes=escopos)
-    cliente = gspread.authorize(credenciais)
-    
-    # Abre a planilha pelo ID fornecido
-    planilha = cliente.open_by_key(spreadsheet_id)
-    
-    try:
-        aba = planilha.worksheet(sheet_name)
-    except gspread.exceptions.WorksheetNotFound:
-        # Fallback de segurança caso a aba não seja encontrada
-        aba = planilha.add_worksheet(title=sheet_name, rows="100", cols="20")
-    
-    # Limpa completamente a aba antes do novo envio (apaga dados e formatações anteriores)
-    aba.clear()
-    
-    # Envia o DataFrame começando sempre da linha 1, incluindo o cabeçalho
-    set_with_dataframe(
-        aba, 
-        df, 
-        row=1, 
-        include_index=False, 
-        include_column_header=True
-    )
-
-st.title("🚚 Disparador de Rastreios | Jumbo CDP → Google Sheets")
+st.title("🚚 Disparador de Rastreios | Jumbo CDP")
 st.markdown("---")
-
-# Barra lateral informativa sobre o status da conexão com os teus dados
-st.sidebar.header("⚙️ Status da Conexão")
-st.sidebar.text_input("ID da Planilha Ativo:", value=ID_PLANILHA, disabled=True)
-st.sidebar.text_input("Aba de Destino:", value=NOME_ABA, disabled=True)
-st.sidebar.info(f"🔑 Conta de Serviço vinculada:\nrastreio-beta@rastreio-banco.iam.gserviceaccount.com")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -127,11 +86,13 @@ if input_vendas and input_rastreio:
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
             if not df_final.empty:
-                # --- TRATAMENTO DATA E MOEDA (Padrão BigQuery) ---
+                # --- TRATAMENTO PARA BIGQUERY (DATA E MOEDA) ---
                 for col in df_final.columns:
                     c_up = str(col).upper()
+                    # Se for coluna de data, converte para YYYY-MM-DD
                     if "DATA" in c_up:
                         df_final[col] = df_final[col].apply(formatar_data_bq)
+                    # Se for coluna financeira, limpa para número puro
                     if any(x in c_up for x in ["VALOR", "TOTAL", "PRECO", "FRETE"]):
                         df_final[col] = df_final[col].apply(limpar_valor_monetario)
 
@@ -141,17 +102,20 @@ if input_vendas and input_rastreio:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
                 df_envio = df_final.copy()
-                st.success(f"✅ {len(df_envio)} pedidos processados com sucesso!")
+                st.success(f"✅ {len(df_envio)} pedidos processados e traduzidos para o BigQuery!")
                 st.dataframe(df_envio, use_container_width=True)
 
                 st.divider()
+                webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
-                # Botão que executa a limpeza e sobrescreve os dados
-                if st.button("🚀 Confirmar Envio (Sobrescrever Planilha)"):
-                    with st.spinner("Limpando histórico antigo e enviando novos dados..."):
-                        enviar_para_sheets(df_envio, ID_PLANILHA, NOME_ABA, CAMINHO_JSON_CREDS)
-                    st.balloons()
-                    st.success(f"Planilha atualizada! A aba '{NOME_ABA}' foi limpa e reescrita com os novos dados.")
-                        
+                if st.button("Confirmar Envio"):
+                    payload = df_envio.to_dict(orient='records')
+                    res = requests.post(webhook, json=payload, timeout=45)
+                    if res.status_code in [200, 201]:
+                        st.balloons()
+                        st.success("Dados enviados! Datas e Valores agora estão no padrão do BigQuery.")
+                    else:
+                        st.error(f"Erro {res.status_code}")
     except Exception as e:
-        st.error(f"Erro crítico no processamento ou envio: {e}")
+        st.error(f"Erro no processamento: {e}")
+
