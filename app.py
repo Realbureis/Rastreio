@@ -2,6 +2,17 @@ import streamlit as st
 import pandas as pd
 import io
 import re
+import subprocess
+import sys
+
+# Força a instalação do openpyxl se a nuvem do Streamlit travar o cache do requirements
+try:
+    import openpyxl
+    import xlsxwriter
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl", "xlsxwriter"])
+    import openpyxl
+    import xlsxwriter
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
@@ -105,7 +116,7 @@ if input_vendas and input_rastreio:
                 st.divider()
                 st.subheader("3. Exportar para o Google Sheets")
                 
-                # Geração do arquivo Excel (.xlsx) na memória para evitar problemas com colunas coladas
+                # Geração do arquivo Excel (.xlsx) na memória usando o motor openpyxl instalado na marra
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     df_envio.to_excel(writer, index=False, sheet_name='Página1')
