@@ -105,14 +105,16 @@ if input_vendas and input_rastreio:
                 st.divider()
                 st.subheader("3. Exportar para o Google Sheets")
                 
-                # Gerando CSV nativo usando Tabulação (\t) como separador. 
-                # Isso impede que o Excel/Sheets misture as linhas por causa de vírgulas nos nomes.
-                csv_data = df_envio.to_csv(index=False, sep='\t', encoding='utf-8')
+                # Força a criação do CSV separado por ponto e vírgula com encoding correto
+                csv_puro = df_envio.to_csv(index=False, sep=';', encoding='utf-8-sig')
                 
-                # Botão de download limpo e nativo
+                # Injeta a instrução 'sep=;' na primeira linha para o Excel/Sheets abrirem direto em colunas
+                csv_com_instrucao = f"sep=;\n{csv_puro}"
+                
+                # Botão de download nativo
                 st.download_button(
                     label="📥 Baixar Dados Formatados para Google Sheets",
-                    data=csv_data,
+                    data=csv_com_instrucao,
                     file_name="rastreio_jumbo_formatado.csv",
                     mime="text/csv",
                     use_container_width=True
