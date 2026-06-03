@@ -2,17 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 import re
-import subprocess
-import sys
-
-# Força a instalação do openpyxl se a nuvem do Streamlit travar o cache do requirements
-try:
-    import openpyxl
-    import xlsxwriter
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl", "xlsxwriter"])
-    import openpyxl
-    import xlsxwriter
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Jumbo CDP - Rastreio", layout="wide", page_icon="🚚")
@@ -116,18 +105,16 @@ if input_vendas and input_rastreio:
                 st.divider()
                 st.subheader("3. Exportar para o Google Sheets")
                 
-                # Geração do arquivo Excel (.xlsx) na memória usando o motor openpyxl instalado na marra
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df_envio.to_excel(writer, index=False, sheet_name='Página1')
-                buffer.seek(0)
+                # Gerando CSV nativo usando Tabulação (\t) como separador. 
+                # Isso impede que o Excel/Sheets misture as linhas por causa de vírgulas nos nomes.
+                csv_data = df_envio.to_csv(index=False, sep='\t', encoding='utf-8')
                 
-                # Botão de download configurado para Excel Real
+                # Botão de download limpo e nativo
                 st.download_button(
-                    label="📥 Baixar Planilha Separada por Colunas",
-                    data=buffer,
-                    file_name="rastreio_jumbo_formatado.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    label="📥 Baixar Dados Formatados para Google Sheets",
+                    data=csv_data,
+                    file_name="rastreio_jumbo_formatado.csv",
+                    mime="text/csv",
                     use_container_width=True
                 )
                 
