@@ -3,3 +3,6 @@ pandas
 xlsxwriter
 requests
 openpyxl
+gspread
+gspread-dataframe
+google-auth
