@@ -17,6 +17,7 @@ def tratar_primeiro_nome(texto):
 def formatar_data_bq(texto):
     """Converte DD/MM/YYYY para YYYY-MM-DD para o BigQuery entender como DATE"""
     txt = str(texto).strip()
+    # Procura o padrão de data brasileira 00/00/0000
     match = re.search(r'(\d{2})/(\d{2})/(\d{4})', txt)
     if match:
         dia, mes, ano = match.groups()
@@ -33,21 +34,13 @@ def limpar_valor_monetario(valor):
     return v
 
 def processar_fone_jumbo(row):
-    """Limpa o telefone mantendo apenas os números e garante o 55 na frente"""
-    fixo = str(row.get('Fone Fixo', '')).strip().split('.')[0]
-    cel = str(row.get('Celular', '')).strip().split('.')[0]
-    
-    if 'E+' in fixo.upper(): fixo = ""
-    if 'E+' in cel.upper(): cel = ""
-    
-    bruto = cel if cel and cel.lower() not in ["nan", "none", "0", ""] else fixo
+    """Fallback Fixo > Celular | Limpa | Adiciona 55"""
+    fixo = str(row.get('Fone Fixo', '')).strip()
+    cel = str(row.get('Celular', '')).strip()
+    bruto = fixo if fixo and fixo.lower() not in ["nan", "none", "0", ""] else cel
     limpo = re.sub(r'\D', '', bruto)
-    
-    if limpo and 8 <= len(limpo) <= 12:
-        if not limpo.startswith('55'):
-            limpo = '55' + limpo
-        return limpo  # Aqui enviamos o número limpo (o n8n insere como texto no Sheets)
-        
+    if limpo and len(limpo) >= 8:
+        return '55' + limpo if not limpo.startswith('55') else limpo
     return None
 
 st.title("🚚 Disparador de Rastreios | Jumbo CDP")
@@ -93,11 +86,13 @@ if input_vendas and input_rastreio:
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
             if not df_final.empty:
-                # --- TRATAMENTO PARA BIGQUERY ---
+                # --- TRATAMENTO PARA BIGQUERY (DATA E MOEDA) ---
                 for col in df_final.columns:
                     c_up = str(col).upper()
+                    # Se for coluna de data, converte para YYYY-MM-DD
                     if "DATA" in c_up:
                         df_final[col] = df_final[col].apply(formatar_data_bq)
+                    # Se for coluna financeira, limpa para número puro
                     if any(x in c_up for x in ["VALOR", "TOTAL", "PRECO", "FRETE"]):
                         df_final[col] = df_final[col].apply(limpar_valor_monetario)
 
@@ -107,28 +102,20 @@ if input_vendas and input_rastreio:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
                 df_envio = df_final.copy()
-                st.success(f"✅ {len(df_envio)} pedidos prontos para envio!")
+                st.success(f"✅ {len(df_envio)} pedidos processados e traduzidos para o BigQuery!")
                 st.dataframe(df_envio, use_container_width=True)
 
                 st.divider()
-                st.subheader("3. Enviar Direto para o n8n ➡️ Google Sheets")
+                webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
                 
-                # Input para colocar a URL do Webhook do seu n8n da VPS
-                webhook_url = st.text_input("URL do Webhook do n8n:", value="https://n8n.corcaqui.com.br/webhook/b5007963-8d59-4c88-ae17-33dfe20b9d91")
-                
-                if st.button("🚀 Confirmar e Injetar na Planilha", use_container_width=True):
-                    with st.spinner("Enviando dados para a planilha via n8n..."):
-                        # Transforma o DataFrame em uma lista de dicionários JSON limpos
-                        payload = df_envio.to_dict(orient='records')
-                        
-                        # Faz a requisição HTTP POST para a sua VPS
-                        res = requests.post(webhook_url, json=payload, timeout=60)
-                        
-                        if res.status_code in [200, 201]:
-                            st.balloons()
-                            st.success("🔥 Sucesso! Os dados foram injetados direto na planilha 'Rastreio' via n8n!")
-                        else:
-                            st.error(f"Falha no envio. Código de status: {res.status_code}. Resposta: {res.text}")
-                
+                if st.button("Confirmar Envio"):
+                    payload = df_envio.to_dict(orient='records')
+                    res = requests.post(webhook, json=payload, timeout=45)
+                    if res.status_code in [200, 201]:
+                        st.balloons()
+                        st.success("Dados enviados! Datas e Valores agora estão no padrão do BigQuery.")
+                    else:
+                        st.error(f"Erro {res.status_code}")
     except Exception as e:
-        st.error(f"Erro no processamento interno: {e}")
+        st.error(f"Erro no processamento: {e}")
+
