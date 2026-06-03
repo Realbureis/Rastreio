@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import io
-import requests
 import re
 
 # 1. Configuração da Página
@@ -89,10 +88,8 @@ if input_vendas and input_rastreio:
                 # --- TRATAMENTO PARA BIGQUERY (DATA E MOEDA) ---
                 for col in df_final.columns:
                     c_up = str(col).upper()
-                    # Se for coluna de data, converte para YYYY-MM-DD
                     if "DATA" in c_up:
                         df_final[col] = df_final[col].apply(formatar_data_bq)
-                    # Se for coluna financeira, limpa para número puro
                     if any(x in c_up for x in ["VALOR", "TOTAL", "PRECO", "FRETE"]):
                         df_final[col] = df_final[col].apply(limpar_valor_monetario)
 
@@ -102,20 +99,26 @@ if input_vendas and input_rastreio:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
                 df_envio = df_final.copy()
-                st.success(f"✅ {len(df_envio)} pedidos processados e traduzidos para o BigQuery!")
+                st.success(f"✅ {len(df_envio)} pedidos processados e traduzidos com sucesso!")
                 st.dataframe(df_envio, use_container_width=True)
 
                 st.divider()
-                webhook = st.text_input("URL do Webhook:", value="https://n8n.corcaqui.com.br/webhook-test/b5007963-8d59-4c88-ae17-33dfe20b9d91")
+                st.subheader("3. Exportar para o Google Sheets")
                 
-                if st.button("Confirmar Envio"):
-                    payload = df_envio.to_dict(orient='records')
-                    res = requests.post(webhook, json=payload, timeout=45)
-                    if res.status_code in [200, 201]:
-                        st.balloons()
-                        st.success("Dados enviados! Datas e Valores agora estão no padrão do BigQuery.")
-                    else:
-                        st.error(f"Erro {res.status_code}")
+                # Geração do arquivo Excel (.xlsx) na memória para evitar problemas com colunas coladas
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_envio.to_excel(writer, index=False, sheet_name='Página1')
+                buffer.seek(0)
+                
+                # Botão de download configurado para Excel Real
+                st.download_button(
+                    label="📥 Baixar Planilha Separada por Colunas",
+                    data=buffer,
+                    file_name="rastreio_jumbo_formatado.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+                
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
-
+        st.error(f"Erro no processamento interno: {e}")
