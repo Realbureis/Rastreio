@@ -1,4 +1,4 @@
-]import streamlit as st
+import streamlit as st
 import pandas as pd
 import io
 import re
@@ -16,7 +16,6 @@ def tratar_primeiro_nome(texto):
 def formatar_data_bq(texto):
     """Converte DD/MM/YYYY para YYYY-MM-DD para o BigQuery entender como DATE"""
     txt = str(texto).strip()
-    # Procura o padrão de data brasileira 00/00/0000
     match = re.search(r'(\d{2})/(\d{2})/(\d{4})', txt)
     if match:
         dia, mes, ano = match.groups()
@@ -33,21 +32,23 @@ def limpar_valor_monetario(valor):
     return v
 
 def processar_fone_jumbo(row):
-    """Limpa o telefone de forma cirúrgica mantendo apenas os números e inserindo o 55"""
+    """Limpa o telefone mantendo apenas os números e adiciona formatação de texto invisível"""
     fixo = str(row.get('Fone Fixo', '')).strip().split('.')[0]
     cel = str(row.get('Celular', '')).strip().split('.')[0]
     
-    # Prioriza Celular se existir, pois é o canal de disparo para o WhatsApp
-    bruto = cel if cel and cel.lower() not in ["nan", "none", "0", ""] else fixo
+    # Se o número bruto já estiver em notação científica por erro de input (ex: 5.51E+12), limpa o padrão
+    if 'E+' in fixo.upper(): fixo = ""
+    if 'E+' in cel.upper(): cel = ""
     
-    # Remove qualquer caractere que não seja número puro
+    bruto = cel if cel and cel.lower() not in ["nan", "none", "0", ""] else fixo
     limpo = re.sub(r'\D', '', bruto)
     
-    # Valida o tamanho do número brasileiro (entre 8 e 12 dígitos)
     if limpo and 8 <= len(limpo) <= 12:
-        if limpo.startswith('55') and len(limpo) >= 10:
-            return limpo
-        return '55' + limpo
+        if not limpo.startswith('55'):
+            limpo = '55' + limpo
+        
+        # 💡 O TRUQUE: Injeta uma aspa simples na frente para o Sheets tratar estritamente como texto
+        return f"'{limpo}"
         
     return None
 
@@ -94,7 +95,7 @@ if input_vendas and input_rastreio:
             df_final = df_final.dropna(subset=['Fone Fixo']).copy()
 
             if not df_final.empty:
-                # --- TRATAMENTO PARA BIGQUERY (DATA E MOEDA) ---
+                # --- TRATAMENTO PARA BIGQUERY ---
                 for col in df_final.columns:
                     c_up = str(col).upper()
                     if "DATA" in c_up:
@@ -107,22 +108,22 @@ if input_vendas and input_rastreio:
                 if 'Detento' in df_final.columns:
                     df_final['Detento'] = df_final['Detento'].apply(tratar_primeiro_nome)
 
+                # Força a coluna do código de rastreio a manter formatação textual simples se necessário
+                if 'Código de Rastreio' in df_final.columns:
+                    df_final['Código de Rastreio'] = df_final['Código de Rastreio'].apply(lambda x: f"'{str(x).strip()}" if str(x).strip().isdigit() else str(x).strip())
+
                 df_envio = df_final.copy()
-                st.success(f"✅ {len(df_envio)} pedidos processados e traduzidos com sucesso!")
+                st.success(f"✅ {len(df_envio)} pedidos processados com sucesso!")
                 st.dataframe(df_envio, use_container_width=True)
 
                 st.divider()
                 st.subheader("3. Exportar para o Google Sheets")
                 
-                # Desativa temporariamente qualquer limite de exibição de linhas no Pandas
                 with pd.option_context('display.max_rows', None):
-                    # Converte o DataFrame COMPLETO em tabela HTML
                     html_table = df_envio.to_html(index=False, border=1, justify="left")
                 
-                # Injeta a tag meta charset para o navegador ler os acentos brasileiros sem bugar
                 html_final = f'<meta charset="utf-8">\n{html_table}'
                 
-                # Botão de download gerando a tabela sem travas
                 st.download_button(
                     label="📥 Baixar Dados Formatados para Google Sheets",
                     data=html_final,
